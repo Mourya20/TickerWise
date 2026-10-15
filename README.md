@@ -1,8 +1,6 @@
 # TickerWise
 
-*(formerly Stock Intelligence Workbench)*
-
-Reliable stock intelligence and automated End-of-Day (EOD) market data workbench for Indian equities (NSE & BSE).
+Reliable automated End-of-Day (EOD) market data workbench for Indian equities (NSE & BSE).
 
 ## Market Data Providers
 
@@ -39,7 +37,7 @@ python scripts/run_eod_update.py --backfill-symbol RELIANCE --from-date 2026-10-
 Automated recurring updates are configured to run at **21:00 IST (UTC+5:30)** on trading days (Monday–Friday) via PowerShell:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\Stock-Intelligence-Workbench\scripts\run_eod_scheduled.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\TickerWise\scripts\run_eod_scheduled.ps1"
 ```
 
 Detailed setup instructions and XML configurations are in [docs/windows_task_scheduler_setup.md](docs/windows_task_scheduler_setup.md).

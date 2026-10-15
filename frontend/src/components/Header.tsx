@@ -17,7 +17,7 @@ export const Header: React.FC<HeaderProps> = ({ apiStatus, onReset }) => {
             </svg>
           </div>
           <div className="brand-text">
-            <h1 className="brand-title">Stock Intelligence Workbench</h1>
+            <h1 className="brand-title">TickerWise</h1>
             <span className="brand-subtitle">NSE Equities & Market Snapshot Browser</span>
           </div>
         </div>

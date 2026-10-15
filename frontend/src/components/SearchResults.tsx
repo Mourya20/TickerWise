@@ -23,19 +23,11 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   if (results.length === 0) {
     return (
       <div className="search-empty-state" role="region" aria-label="Search results">
-        <div className="empty-icon" aria-hidden="true">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-            <path d="M8 11h6" />
-          </svg>
-        </div>
-        <h3 className="empty-title">No instruments found</h3>
-        <p className="empty-message">
-          No NSE-listed companies or symbols matched <strong>"{query}"</strong>.
-        </p>
+        <div className="state-header-tag">NO MATCHES</div>
+        <h2 className="empty-title">Nothing found for "{query}"</h2>
+        <p className="empty-message">No instruments found</p>
         <p className="empty-suggestion">
-          Try searching by full symbol (e.g. <code>TCS</code>, <code>RELIANCE</code>, <code>INFY</code>) or common company name keywords.
+          Try a company name, or part of an NSE symbol.
         </p>
       </div>
     );
@@ -49,12 +41,15 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   return (
     <div className="search-results-container" role="region" aria-label="Search results">
       <div className="results-header">
-        <div className="results-summary">
-          <span className="results-badge">NSE Equities</span>
+        <div className="results-title-group">
+          <h1 className="results-heading" id="results-for-query-heading">
+            RESULTS FOR "{query}"
+          </h1>
           <span className="results-range-text">
-            Displaying instruments <strong>{startIdx}–{endIdx}</strong> for "<strong>{query}</strong>"
+            Displaying instruments {startIdx}–{endIdx}
           </span>
         </div>
+        <span className="results-badge">NSE Equities</span>
       </div>
 
       <div className="table-responsive">
@@ -133,7 +128,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
 
       <div className="pagination-bar">
         <div className="pagination-info">
-          Page {Math.floor(offset / limit) + 1}
+          PAGE {Math.floor(offset / limit) + 1} · MULTIPLE SERIES FOR A SYMBOL LIST AS SEPARATE ROWS
         </div>
         <div className="pagination-controls">
           <button
@@ -144,7 +139,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
             onClick={() => onPageChange(Math.max(0, offset - limit))}
             aria-label="Previous page of results"
           >
-            ← Previous
+            ← Prev
           </button>
           <button
             type="button"

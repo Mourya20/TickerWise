@@ -4,7 +4,7 @@ import App from '../App';
 import * as api from '../services/api';
 import type { InstrumentDetailResponse, InstrumentSearchResult } from '../types/instrument';
 
-describe('Stock Intelligence Workbench — End-to-End Component Tests', () => {
+describe('TickerWise — End-to-End Component Tests', () => {
   const mockSearchResultsTcs: InstrumentSearchResult[] = [
     {
       instrument_id: 2304,

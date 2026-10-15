@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTheme } from '../context/ThemeContext';
 
 interface SearchBarProps {
   initialQuery?: string;
@@ -11,6 +12,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   onSearch,
   isLoading = false,
 }) => {
+  const { theme } = useTheme();
   const [query, setQuery] = useState(initialQuery);
   const [prevInitialQuery, setPrevInitialQuery] = useState(initialQuery);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -19,6 +21,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     setPrevInitialQuery(initialQuery);
     setQuery(initialQuery);
   }
+
+  const placeholderText = theme === 'dark'
+    ? '> find company or symbol'
+    : 'Search by company name or NSE symbol';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +62,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             id="stock-search-input"
             type="text"
             className="search-input"
-            placeholder="Search by company name or symbol (e.g. TCS, RELIANCE, INFOSYS)..."
+            placeholder={placeholderText}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

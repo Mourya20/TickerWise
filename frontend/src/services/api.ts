@@ -1,6 +1,7 @@
 import type {
   InstrumentDetailResponse,
   InstrumentSearchResult,
+  ProviderStatusResponse,
 } from '../types/instrument';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8000';
@@ -73,6 +74,26 @@ export async function checkHealth(signal?: AbortSignal): Promise<{ status: strin
       throw error;
     }
     throw new ApiRequestError('Unable to connect to the backend server. Please verify it is running.');
+  }
+}
+
+export async function getProviderStatus(signal?: AbortSignal): Promise<ProviderStatusResponse> {
+  const baseUrl = getApiBaseUrl();
+  try {
+    const response = await fetch(`${baseUrl}/api/v1/providers/status`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<ProviderStatusResponse>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    throw new ApiRequestError('Unable to retrieve provider status from backend.');
   }
 }
 

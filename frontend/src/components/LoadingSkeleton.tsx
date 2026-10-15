@@ -8,7 +8,10 @@ export const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({ type = 'genera
   if (type === 'table') {
     return (
       <div className="skeleton-container" role="status" aria-label="Loading instruments">
-        <div className="skeleton-header-bar" />
+        <div className="skeleton-status-strip">
+          <span className="spinner-inline" aria-hidden="true" />
+          <span className="skeleton-status-text">Searching instruments…</span>
+        </div>
         <div className="skeleton-table">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="skeleton-row">
@@ -27,7 +30,10 @@ export const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({ type = 'genera
   if (type === 'detail') {
     return (
       <div className="skeleton-container" role="status" aria-label="Loading instrument details">
-        <div className="skeleton-back-btn" />
+        <div className="skeleton-status-strip">
+          <span className="spinner-inline" aria-hidden="true" />
+          <span className="skeleton-status-text">Loading company details…</span>
+        </div>
         <div className="skeleton-card card-large">
           <div className="skeleton-badge-row" />
           <div className="skeleton-title" />
@@ -44,6 +50,10 @@ export const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({ type = 'genera
 
   return (
     <div className="skeleton-container" role="status" aria-label="Loading">
+      <div className="skeleton-status-strip">
+        <span className="spinner-inline" aria-hidden="true" />
+        <span className="skeleton-status-text">Loading…</span>
+      </div>
       <div className="skeleton-card card-large" />
     </div>
   );

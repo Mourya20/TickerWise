@@ -9,7 +9,7 @@ This guide configures an automated, reliable Windows Task Scheduler job to run T
 - **Scheduled Time**: **21:00 IST (UTC+5:30)**, Monday through Friday.
 - **Execution Script**: `scripts/run_eod_scheduled.ps1` wrapping `scripts/run_eod_update.py`.
 - **Interpreter**: `backend/.venv/Scripts/python.exe`.
-- **Working Directory**: `D:\Stock-Intelligence-Workbench`.
+- **Working Directory**: `D:\TickerWise`.
 - **Concurrency Protection**: Lockfile mechanism preventing simultaneous overlapping executions.
 - **Idempotency**: Runs check the provider's published date and existing `ingestion_runs` before committing; duplicate runs are safely skipped.
 
@@ -21,7 +21,7 @@ Run PowerShell as Administrator and execute:
 
 ```powershell
 schtasks /create /tn "TickerWise_EOD_Update" `
-  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"D:\Stock-Intelligence-Workbench\scripts\run_eod_scheduled.ps1\"" `
+  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"D:\TickerWise\scripts\run_eod_scheduled.ps1\"" `
   /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 21:00 `
   /ru "%USERNAME%"
 ```
@@ -51,8 +51,8 @@ If configuring via `taskschd.msc`:
 3. **Actions**:
    - Action: `Start a program`
    - Program/script: `powershell.exe`
-   - Add arguments: `-NoProfile -ExecutionPolicy Bypass -File "D:\Stock-Intelligence-Workbench\scripts\run_eod_scheduled.ps1"`
-   - Start in (optional): `D:\Stock-Intelligence-Workbench`
+   - Add arguments: `-NoProfile -ExecutionPolicy Bypass -File "D:\TickerWise\scripts\run_eod_scheduled.ps1"`
+   - Start in (optional): `D:\TickerWise`
 4. **Settings**:
    - Allow task to be run on demand: `Checked`
    - Run task as soon as possible after a scheduled start is missed: `Checked`
@@ -68,23 +68,23 @@ To test the update manually at any time:
 
 ```powershell
 # Check provider freshness and current trading date
-& "D:\Stock-Intelligence-Workbench\backend\.venv\Scripts\python.exe" "D:\Stock-Intelligence-Workbench\scripts\run_eod_update.py" --check-status
+& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --check-status
 
 # Perform a dry-run (verifies network and parsing without writing to DB)
-& "D:\Stock-Intelligence-Workbench\backend\.venv\Scripts\python.exe" "D:\Stock-Intelligence-Workbench\scripts\run_eod_update.py" --dry-run
+& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --dry-run
 
 # Run full ingestion for latest available date
-& "D:\Stock-Intelligence-Workbench\backend\.venv\Scripts\python.exe" "D:\Stock-Intelligence-Workbench\scripts\run_eod_update.py"
+& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py"
 
 # Backfill historical OHLCV for a symbol
-& "D:\Stock-Intelligence-Workbench\backend\.venv\Scripts\python.exe" "D:\Stock-Intelligence-Workbench\scripts\run_eod_update.py" --backfill-symbol RELIANCE --from-date 2026-10-01 --to-date 2026-10-14
+& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --backfill-symbol RELIANCE --from-date 2026-10-01 --to-date 2026-10-14
 ```
 
 ---
 
 ## 5. Logs & Monitoring
 
-- **Log File**: `D:\Stock-Intelligence-Workbench\logs\eod_update.log`
-- **Scheduler Log**: `D:\Stock-Intelligence-Workbench\logs\eod_update_scheduler.log`
-- **Review / Rejected Rows**: `D:\Stock-Intelligence-Workbench\data\rejected\eod_snapshot_review_*.csv`
+- **Log File**: `D:\TickerWise\logs\eod_update.log`
+- **Scheduler Log**: `D:\TickerWise\logs\eod_update_scheduler.log`
+- **Review / Rejected Rows**: `D:\TickerWise\data\rejected\eod_snapshot_review_*.csv`
 - **API Status**: `GET http://localhost:8000/api/v1/providers/status`
