@@ -1,0 +1,124 @@
+# ==============================================================================
+# TickerWise / Stock Intelligence Workbench - Root .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Environment Variables & Secrets (CRITICAL: Never commit secrets)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+.env.local
+*.env
+*.env.*
+**/.env
+**/.env.*
+**/.env.local
+!**/.env.example
+
+# ------------------------------------------------------------------------------
+# Python & Backend
+# ------------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+ENV/
+env/
+
+# Packaging & Builds
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing & Coverage
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+coverage/
+.tox/
+.nox/
+
+# ------------------------------------------------------------------------------
+# Node & Frontend (Vite / React)
+# ------------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+.vite/
+**/.vite/
+*.local
+
+# Package Manager Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ------------------------------------------------------------------------------
+# Local Data, Raw CSVs & Rejected Review Records
+# ------------------------------------------------------------------------------
+data/raw/
+data/rejected/
+data/*.csv
+data/**/*.csv
+
+# ------------------------------------------------------------------------------
+# Logs & Local Databases
+# ------------------------------------------------------------------------------
+*.log
+**/*.log
+logs/
+**/logs/
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql
+
+# ------------------------------------------------------------------------------
+# IDE, Editors & Tooling
+# ------------------------------------------------------------------------------
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ------------------------------------------------------------------------------
+# Operating System
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
