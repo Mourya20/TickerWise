@@ -96,6 +96,8 @@ class TestProviderApiRoutes(unittest.TestCase):
                 trading_date=date(2026, 10, 14),
                 source_status="derived",
                 status="completed",
+                started_at=datetime(2026, 10, 14, 20, 0, 0),
+                completed_at=datetime(2026, 10, 14, 20, 10, 0),
                 records_read=2944,
                 records_inserted=2593,
                 records_updated=0,

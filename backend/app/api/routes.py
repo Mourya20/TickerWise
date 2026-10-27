@@ -1,19 +1,30 @@
 from datetime import date
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import Company, DailyMarketSnapshot, DataSource, IngestionRun, Instrument
+from app.models import (
+    Company,
+    DailyMarketSnapshot,
+    DataSource,
+    IngestionRun,
+    Instrument,
+    InstrumentShareCount,
+)
 from app.providers.tejhq import TejHQProvider
 from app.schemas.instrument import (
     InstrumentDetailResponse,
     InstrumentSearchResult,
     MarketSnapshotResponse,
+    PriceBarResponse,
+    ShareCountHistoryResponse,
 )
 from app.schemas.provider import ProviderInfo, ProviderStatusResponse
+from app.services.market_cap_service import MarketCapService
 
 router = APIRouter()
 
@@ -212,6 +223,7 @@ def search_instruments(
         )
 
     pattern = f"%{search_term.lower()}%"
+    lower_query = search_term.lower()
     statement = (
         select(Instrument, Company)
         .join(Company, Company.id == Instrument.company_id)
@@ -222,6 +234,9 @@ def search_instruments(
             )
         )
         .order_by(
+            case((func.lower(Instrument.symbol) == lower_query, 0), else_=1),
+            case((func.lower(Instrument.symbol).like(f"{lower_query}%"), 0), else_=1),
+            case((func.lower(Company.name).like(f"{lower_query}%"), 0), else_=1),
             func.lower(Instrument.symbol),
             func.lower(Instrument.series),
             Instrument.id,
@@ -291,13 +306,22 @@ def get_instrument(
     if snapshot_row is not None:
         snapshot, source = snapshot_row
 
-        # Phase E: Market cap is strictly from current snapshot; never copied from older dates
-        market_cap = snapshot.market_capitalization_crores
+        # Calculate dated, defensible market capitalization using MarketCapService
+        mcap_res = MarketCapService.calculate_for_instrument(instrument.id, db)
+        market_cap = mcap_res.market_cap_crores if mcap_res.market_cap_crores is not None else snapshot.market_capitalization_crores
+        share_count = mcap_res.share_count
+        share_count_date = mcap_res.share_count_date
+        share_count_source = mcap_res.share_count_source
+        share_count_method = mcap_res.share_count_method
+        share_count_status = mcap_res.share_count_status
+        market_cap_explanation = mcap_res.explanation
+        price_basis = mcap_res.price_type
+        price_date = mcap_res.price_date or snapshot.snapshot_date
 
-        # Phase D: Compute staleness honestly from persisted records
+        # Staleness computation from persisted records
         is_stale, freshness_status = compute_snapshot_freshness(snapshot.snapshot_date, db)
 
-        # Phase F: Associate last_ingested_at with matching IngestionRun if available
+        # Associate last_ingested_at with matching IngestionRun if available
         last_ingested_at = snapshot.created_at
         if snapshot.source_id and snapshot.snapshot_date:
             associated_run = db.execute(
@@ -323,6 +347,14 @@ def get_instrument(
             percentage_change_pct=snapshot.percentage_change_pct,
             is_calculated_change=snapshot.is_calculated_change,
             market_capitalization_crores=market_cap,
+            market_cap_price_basis=price_basis,
+            market_cap_price_date=price_date,
+            share_count=share_count,
+            share_count_date=share_count_date,
+            share_count_source=share_count_source,
+            share_count_method=share_count_method,
+            share_count_status=share_count_status,
+            market_cap_explanation=market_cap_explanation,
             volume_lakhs=snapshot.volume_lakhs,
             traded_value_crores=snapshot.traded_value_crores,
             volume=snapshot.volume,
@@ -350,4 +382,129 @@ def get_instrument(
         is_active=instrument.is_active,
         snapshot=snapshot_response,
     )
+
+
+@router.get(
+    "/api/v1/instruments/{instrument_id}/prices",
+    response_model=list[PriceBarResponse],
+)
+def get_instrument_prices(
+    instrument_id: int,
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
+    limit: int = Query(1000, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[PriceBarResponse]:
+    inst = db.get(Instrument, instrument_id)
+    if inst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Instrument not found.",
+        )
+
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date range: 'from' date cannot be after 'to' date.",
+        )
+
+    statement = (
+        select(DailyMarketSnapshot, DataSource)
+        .outerjoin(DataSource, DataSource.id == DailyMarketSnapshot.source_id)
+        .where(DailyMarketSnapshot.instrument_id == instrument_id)
+    )
+
+    if from_date is not None:
+        statement = statement.where(DailyMarketSnapshot.snapshot_date >= from_date)
+    if to_date is not None:
+        statement = statement.where(DailyMarketSnapshot.snapshot_date <= to_date)
+
+    # Order descending with limit/offset to capture the most recent bars up to to_date,
+    # then reverse to present in ascending chronological order for charts.
+    statement = (
+        statement.order_by(DailyMarketSnapshot.snapshot_date.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+
+    try:
+        rows = list(reversed(db.execute(statement).all()))
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise database_error() from exc
+
+    return [
+        PriceBarResponse(
+            trading_date=snapshot.snapshot_date,
+            open=snapshot.open_price,
+            high=snapshot.high_price,
+            low=snapshot.low_price,
+            close=snapshot.close_price,
+            ltp=snapshot.last_traded_price,
+            prev_close=snapshot.prev_close_price,
+            volume=snapshot.volume,
+            volume_lakhs=snapshot.volume_lakhs,
+            turnover=snapshot.turnover,
+            traded_value_crores=snapshot.traded_value_crores,
+            percentage_change_pct=snapshot.percentage_change_pct,
+            trade_count=snapshot.trade_count,
+            source_name=source.name if source else None,
+        )
+        for snapshot, source in rows
+    ]
+
+
+@router.get(
+    "/api/v1/instruments/{instrument_id}/share-counts",
+    response_model=list[ShareCountHistoryResponse],
+)
+def get_instrument_share_counts(
+    instrument_id: int,
+    db: Session = Depends(get_db),
+) -> list[ShareCountHistoryResponse]:
+    inst = db.get(Instrument, instrument_id)
+    if inst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Instrument not found.",
+        )
+
+    statement = (
+        select(InstrumentShareCount, DataSource)
+        .outerjoin(DataSource, DataSource.id == InstrumentShareCount.source_id)
+        .where(InstrumentShareCount.instrument_id == instrument_id)
+        .order_by(InstrumentShareCount.reporting_date.desc(), InstrumentShareCount.id.desc())
+    )
+
+    try:
+        rows = db.execute(statement).all()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise database_error() from exc
+
+    return [
+        ShareCountHistoryResponse(
+            id=rec.id,
+            instrument_id=rec.instrument_id,
+            symbol=rec.symbol,
+            series=rec.series,
+            share_class=rec.share_class,
+            reported_share_count=rec.reported_share_count,
+            fully_paid_shares=rec.fully_paid_shares,
+            partly_paid_shares=rec.partly_paid_shares,
+            source_capital_amount=rec.source_capital_amount,
+            face_value=rec.face_value,
+            reporting_date=rec.reporting_date,
+            filing_date=rec.filing_date,
+            retrieved_at=rec.retrieved_at,
+            source_name=source.name if source else None,
+            extraction_method=rec.extraction_method,
+            validation_status=rec.validation_status,
+            corporate_action_adjusted=rec.corporate_action_adjusted,
+            corporate_action_details=rec.corporate_action_details,
+        )
+        for rec, source in rows
+    ]
+
 

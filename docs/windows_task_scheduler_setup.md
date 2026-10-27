@@ -1,90 +1,121 @@
 # Windows Task Scheduler Setup: TickerWise EOD Updates
 
-This guide configures an automated, reliable Windows Task Scheduler job to run TickerWise End-of-Day (EOD) market data updates.
+This guide configures automated, reliable Windows Task Scheduler jobs to run TickerWise End-of-Day (EOD) market data updates and chronological catch-up on trading days.
+
+---
 
 ## 1. Scheduling Overview
 
-- **Target Session**: NSE End-of-Day trading sessions.
-- **Provider Timing**: TejHQ cron publishes daily at ~18:30 IST with a retry at ~21:30 IST; data is consistently ready by ~20:30–21:00 IST.
-- **Scheduled Time**: **21:00 IST (UTC+5:30)**, Monday through Friday.
-- **Execution Script**: `scripts/run_eod_scheduled.ps1` wrapping `scripts/run_eod_update.py`.
-- **Interpreter**: `backend/.venv/Scripts/python.exe`.
-- **Working Directory**: `D:\TickerWise`.
-- **Concurrency Protection**: Lockfile mechanism preventing simultaneous overlapping executions.
-- **Idempotency**: Runs check the provider's published date and existing `ingestion_runs` before committing; duplicate runs are safely skipped.
+- **Exchange**: National Stock Exchange of India (NSE).
+- **Target Session**: End-of-Day (EOD) trading sessions (trading days: Monday through Friday).
+- **Provider Cadence**: TejHQ executes primary daily ingestion at ~18:30 IST with a retry/derived stage run at ~21:30 IST.
+- **Recommended Schedule**:
+  1. **Primary EOD Ingestion**: **18:30 IST (UTC+5:30)**, Monday through Friday.
+  2. **Secondary Reconciliation & Catch-Up**: **21:30 IST (UTC+5:30)**, Monday through Friday.
+- **Execution Script**: `scripts\run_eod_scheduled.ps1` wrapping `scripts\run_eod_update.py`.
+- **Concurrency Protection**: Lockfile mechanism (`logs\eod_update.lock`) with 30-minute stale detection preventing overlapping runs.
+- **Idempotency**: Runs verify published provider dates and existing `ingestion_runs` before committing; duplicate runs are safely skipped without duplicate records.
+- **Exit Codes**:
+  - `0`: Success (new data ingested or unchanged day skipped).
+  - `1`: Error (validation failure, database critical error).
+  - `2`: Provider unavailable or pipeline stage not ready yet.
 
 ---
 
 ## 2. Quick Command Setup (`schtasks`)
 
-Run PowerShell as Administrator and execute:
+Open PowerShell as Administrator in the repository directory and register the two scheduled tasks. Replace `<PROJECT_DIR>` with your actual repository path (e.g., `D:\stock-intelligence-workbench`):
 
 ```powershell
-schtasks /create /tn "TickerWise_EOD_Update" `
-  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"D:\TickerWise\scripts\run_eod_scheduled.ps1\"" `
-  /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 21:00 `
+# 1. Primary Daily EOD Ingestion at 18:30 IST
+schtasks /create /tn "TickerWise_EOD_Primary" `
+  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"<PROJECT_DIR>\scripts\run_eod_scheduled.ps1\"" `
+  /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 18:30 `
+  /ru "%USERNAME%"
+
+# 2. Secondary Reconciliation & Catch-Up at 21:30 IST
+schtasks /create /tn "TickerWise_EOD_Catchup" `
+  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"<PROJECT_DIR>\scripts\run_eod_scheduled.ps1\" -CatchUp" `
+  /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 21:30 `
   /ru "%USERNAME%"
 ```
 
-To verify the registered task:
+To verify the registered tasks:
 
 ```powershell
-schtasks /query /tn "TickerWise_EOD_Update" /fo LIST /v
+schtasks /query /tn "TickerWise_EOD_Primary" /fo LIST /v
+schtasks /query /tn "TickerWise_EOD_Catchup" /fo LIST /v
 ```
 
 ---
 
-## 3. GUI Configuration (Task Scheduler)
+## 3. GUI Configuration (`taskschd.msc`)
 
-If configuring via `taskschd.msc`:
+To configure via the Windows Task Scheduler GUI:
 
 1. **General**:
-   - Name: `TickerWise_EOD_Update`
+   - Name: `TickerWise_EOD_Primary`
    - Description: `Automatically ingest NSE EOD market data from TejHQ into MySQL`
-   - Run whether user is logged on or not: Check (or Run only when user is logged on, based on user preference)
-   - Run with highest privileges: Recommended
+   - Security options: `Run whether user is logged on or not` (or `Run only when user is logged on`)
+   - `Run with highest privileges`: Checked
 2. **Triggers**:
    - Begin the task: `On a schedule`
    - Schedule: `Weekly`
    - Recur every: `1` weeks on `Monday, Tuesday, Wednesday, Thursday, Friday`
-   - Start: `21:00:00` (IST)
+   - Start: `18:30:00` (IST)
 3. **Actions**:
    - Action: `Start a program`
    - Program/script: `powershell.exe`
-   - Add arguments: `-NoProfile -ExecutionPolicy Bypass -File "D:\TickerWise\scripts\run_eod_scheduled.ps1"`
-   - Start in (optional): `D:\TickerWise`
+   - Add arguments: `-NoProfile -ExecutionPolicy Bypass -File "scripts\run_eod_scheduled.ps1"`
+   - Start in: `<PROJECT_DIR>`
 4. **Settings**:
-   - Allow task to be run on demand: `Checked`
-   - Run task as soon as possible after a scheduled start is missed: `Checked`
-   - If the task fails, restart every: `15 minutes` (up to `3 times`)
-   - If the running task does not end when requested, force it to stop: `Checked`
-   - If the task is already running, then the following rule applies: `Do not start a new instance`
+   - `Allow task to be run on demand`: Checked
+   - `Run task as soon as possible after a scheduled start is missed`: Checked
+   - `If the task fails, restart every`: `15 minutes` (up to `3 times`)
+   - `Stop the task if it runs longer than`: `1 hour`
+   - `If the running task does not end when requested, force it to stop`: Checked
+   - `If the task is already running, then the following rule applies`: `Do not start a new instance`
+
+Repeat for `TickerWise_EOD_Catchup` at `21:30` IST with argument `-File "scripts\run_eod_scheduled.ps1" -CatchUp`.
 
 ---
 
-## 4. Manual / On-Demand Execution
+## 4. Manual & On-Demand Operations
 
-To test the update manually at any time:
+Use the virtualenv Python interpreter to execute targeted maintenance tasks:
 
 ```powershell
-# Check provider freshness and current trading date
-& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --check-status
+# Set environment
+$env:PYTHONPATH="backend"
 
-# Perform a dry-run (verifies network and parsing without writing to DB)
-& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --dry-run
+# Check provider status and latest available trading session
+python scripts/run_eod_update.py --check-status
 
-# Run full ingestion for latest available date
-& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py"
+# Run dry run (validates API responses and normalization without committing to DB)
+python scripts/run_eod_update.py --dry-run
 
-# Backfill historical OHLCV for a symbol
-& "D:\TickerWise\backend\.venv\Scripts\python.exe" "D:\TickerWise\scripts\run_eod_update.py" --backfill-symbol RELIANCE --from-date 2026-10-01 --to-date 2026-10-14
+# Run full market ingestion for latest available trading date
+python scripts/run_eod_update.py
+
+# Ingest specific historical trading date
+python scripts/run_eod_update.py --date 2026-10-26
+
+# Run chronological catch-up for all un-ingested market dates
+python scripts/run_eod_update.py --catch-up
+
+# Backfill historical OHLCV for specific symbols
+python scripts/run_eod_update.py --backfill-symbols RELIANCE,TCS,INFY,HDFCBANK --from-date 2026-10-01 --to-date 2026-10-26
+
+# Ingest official NSE shareholding pattern disclosures
+python scripts/import_nse_shareholding.py --dir data/sample_filings
 ```
 
 ---
 
-## 5. Logs & Monitoring
+## 5. Audit Logging & Health Monitoring
 
-- **Log File**: `D:\TickerWise\logs\eod_update.log`
-- **Scheduler Log**: `D:\TickerWise\logs\eod_update_scheduler.log`
-- **Review / Rejected Rows**: `D:\TickerWise\data\rejected\eod_snapshot_review_*.csv`
-- **API Status**: `GET http://localhost:8000/api/v1/providers/status`
+- **Ingestion Log**: `logs/eod_update.log` (timestamped, line-by-line pipeline details)
+- **Scheduler Log**: `logs/eod_update_scheduler.log` (process launch, lock verification, exit codes)
+- **Data Quality Review**: `data/rejected/eod_snapshot_review_*.csv` (rows filtered due to validation or zero price)
+- **Database Tracking**: Table `ingestion_runs` records `source_id`, `data_date`, `status`, `records_processed`, `records_inserted`, `records_updated`, `records_skipped`, and `started_at` / `completed_at` timestamps.
+- **Provider Status API**: `GET http://localhost:8000/api/v1/providers/status`

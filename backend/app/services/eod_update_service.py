@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from app.models import (
     DataSource,
     IngestionRun,
     Instrument,
+    InstrumentShareCount,
 )
 from app.providers.base import (
     NormalizedCompanyMetric,
@@ -424,7 +425,7 @@ class EODUpdateService:
                     select(IngestionRun).where(
                         IngestionRun.source_id == source_id,
                         IngestionRun.trading_date == target_date,
-                        IngestionRun.status.in_(("completed", "partial")),
+                        IngestionRun.status == "completed",
                     )
                 )
                 if existing_run is not None:
@@ -534,6 +535,21 @@ class EODUpdateService:
                     int(s.instrument_id): s for s in existing_snapshots
                 }
 
+                # Load active share counts for calculating market capitalization
+                # Point-in-time: strictly require reporting_date <= target_date
+                share_counts = session.scalars(
+                    select(InstrumentShareCount).where(
+                        InstrumentShareCount.share_class == "EQUITY",
+                        InstrumentShareCount.is_active == True,
+                        InstrumentShareCount.reporting_date <= target_date,
+                    ).order_by(InstrumentShareCount.reporting_date.desc(), InstrumentShareCount.id.desc())
+                ).all()
+                share_counts_by_inst_id: dict[int, int] = {}
+                for sc in share_counts:
+                    inst_key = int(sc.instrument_id)
+                    if inst_key not in share_counts_by_inst_id and sc.reported_share_count:
+                        share_counts_by_inst_id[inst_key] = sc.reported_share_count
+
                 for row in normalized_rows:
                     raw_dict = {
                         "symbol": row.symbol,
@@ -585,8 +601,18 @@ class EODUpdateService:
                     if row.turnover is not None:
                         traded_value_crores = Decimal(row.turnover) / Decimal("10000000")
 
-                    # Note on market_capitalization_crores:
-                    # TejHQ snapshot does not include market cap; we keep it None (never fabricate)
+                    inst_id = int(instrument.id)
+
+                    # Calculate dated, defensible market capitalization:
+                    # Market Capitalization in ₹ Crores = (LTP × Applicable Outstanding Shares) / 10,000,000
+                    market_cap_crores: Decimal | None = None
+                    price_for_mcap = row.last_price if row.last_price is not None else row.close
+                    if price_for_mcap is not None and inst_id in share_counts_by_inst_id:
+                        shares = share_counts_by_inst_id[inst_id]
+                        market_cap_crores = (
+                            (price_for_mcap * Decimal(shares)) / Decimal("10000000")
+                        ).quantize(Decimal("0.000001"))
+
                     fields_to_set = {
                         "source_id": source_id,
                         "open_price": row.open,
@@ -602,9 +628,9 @@ class EODUpdateService:
                         "trade_count": row.trades,
                         "volume_lakhs": volume_lakhs,
                         "traded_value_crores": traded_value_crores,
+                        "market_capitalization_crores": market_cap_crores,
                     }
 
-                    inst_id = int(instrument.id)
                     snapshot = snapshots_by_instrument_id.get(inst_id)
 
                     if snapshot is None:
@@ -624,7 +650,7 @@ class EODUpdateService:
                             cur = getattr(snapshot, attr)
                             # Normalize Decimals to column scale to avoid precision mismatch
                             if isinstance(val, Decimal) and isinstance(cur, Decimal):
-                                if attr in ("open_price", "high_price", "low_price", "close_price", "last_traded_price", "prev_close_price", "percentage_change_pct", "volume_lakhs", "traded_value_crores"):
+                                if attr in ("open_price", "high_price", "low_price", "close_price", "last_traded_price", "prev_close_price", "percentage_change_pct", "volume_lakhs", "traded_value_crores", "market_capitalization_crores"):
                                     val_cmp = val.quantize(Decimal("0.000001"))
                                     cur_cmp = cur.quantize(Decimal("0.000001"))
                                 elif attr == "turnover":
@@ -729,3 +755,69 @@ class EODUpdateService:
                 review_path=None,
                 message=f"Fatal error during database ingestion: {exc}",
             )
+
+    def run_catchup(
+        self,
+        max_catchup_days: int = 15,
+        dry_run: bool = False,
+        min_coverage_threshold: int = 0,
+    ) -> list[EODUpdateResult]:
+        """Catch up missing EOD trading dates sequentially between latest local and remote."""
+        provider_status = self.tejhq.get_status()
+        latest_remote = provider_status.trading_date
+        if latest_remote is None:
+            logger.info("Provider has not published any trading date yet.")
+            return []
+
+        # Find completed trading dates to allow recovering partial/incomplete runs
+        with self.session_factory() as session:
+            completed_runs = session.scalars(
+                select(IngestionRun.trading_date).where(
+                    IngestionRun.status == "completed",
+                    IngestionRun.trading_date.is_not(None),
+                )
+            ).all()
+            completed_dates = set(completed_runs)
+
+            last_run = session.scalar(
+                select(IngestionRun)
+                .where(
+                    IngestionRun.status == "completed",
+                    IngestionRun.trading_date.is_not(None),
+                )
+                .order_by(IngestionRun.trading_date.desc())
+                .limit(1)
+            )
+            latest_local = last_run.trading_date if last_run else None
+
+        if latest_local is None:
+            logger.info("No completed local runs found, running update for latest remote date: %s", latest_remote)
+            return [self.run_update(target_date=latest_remote, dry_run=dry_run, min_coverage_threshold=min_coverage_threshold)]
+
+        if latest_local >= latest_remote and all(d in completed_dates for d in [latest_local]):
+            logger.info(
+                "Local database is already up to date with provider (local: %s, remote: %s).",
+                latest_local,
+                latest_remote,
+            )
+            return []
+
+        results = []
+        cur_date = latest_local + timedelta(days=1)
+        count = 0
+        while cur_date <= latest_remote and count < max_catchup_days:
+            # Skip weekends (Saturday=5, Sunday=6)
+            if cur_date.weekday() < 5 and cur_date not in completed_dates:
+                logger.info("Catching up missing or incomplete trading date: %s", cur_date)
+                res = self.run_update(
+                    target_date=cur_date,
+                    force=True,
+                    dry_run=dry_run,
+                    min_coverage_threshold=min_coverage_threshold,
+                )
+                results.append(res)
+                count += 1
+            cur_date += timedelta(days=1)
+
+        return results
+

@@ -19,6 +19,14 @@ export interface MarketSnapshotResponse {
   percentage_change_pct: string | null;
   is_calculated_change?: boolean;
   market_capitalization_crores: string | null;
+  market_cap_price_basis?: string | null;
+  market_cap_price_date?: string | null;
+  share_count?: number | null;
+  share_count_date?: string | null;
+  share_count_source?: string | null;
+  share_count_method?: string | null;
+  share_count_status?: string | null;
+  market_cap_explanation?: string | null;
   volume_lakhs: string | null;
   traded_value_crores: string | null;
   volume?: number | null;
@@ -28,6 +36,44 @@ export interface MarketSnapshotResponse {
   last_ingested_at?: string | null;
   is_stale?: boolean;
   freshness_status?: 'fresh' | 'stale' | 'incomplete' | 'unknown' | string;
+}
+
+export interface PriceBar {
+  trading_date: string;
+  open: string | number | null;
+  high: string | number | null;
+  low: string | number | null;
+  close: string | number | null;
+  ltp: string | number | null;
+  prev_close: string | number | null;
+  volume: number | null;
+  volume_lakhs: string | number | null;
+  turnover: string | number | null;
+  traded_value_crores: string | number | null;
+  percentage_change_pct: string | number | null;
+  trade_count?: number | null;
+  source_name?: string | null;
+}
+
+export interface ShareCountHistory {
+  id: number;
+  instrument_id: number;
+  symbol: string;
+  series: string;
+  share_class: string;
+  reported_share_count: number;
+  fully_paid_shares?: number | null;
+  partly_paid_shares?: number | null;
+  source_capital_amount?: string | number | null;
+  face_value?: string | number | null;
+  reporting_date: string;
+  filing_date?: string | null;
+  retrieved_at: string;
+  source_name?: string | null;
+  extraction_method: string;
+  validation_status: string;
+  corporate_action_adjusted: boolean;
+  corporate_action_details?: string | null;
 }
 
 export interface InstrumentDetailResponse {

@@ -14,6 +14,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from app.providers.tejhq import TejHQProvider  # noqa: E402
 from app.services.eod_update_service import EODUpdateService  # noqa: E402
+from app.services.historical_backfill_service import HistoricalBackfillService  # noqa: E402
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -74,10 +75,21 @@ def main() -> int:
         help="Check provider freshness status and exit.",
     )
     parser.add_argument(
+        "--catch-up",
+        action="store_true",
+        help="Sequentially catch up all missing trading dates between local database and latest provider publication.",
+    )
+    parser.add_argument(
         "--backfill-symbol",
         type=str,
         default=None,
-        help="Symbol to backfill historical OHLCV data for.",
+        help="Symbol to backfill historical OHLCV data for into the database.",
+    )
+    parser.add_argument(
+        "--backfill-symbols",
+        type=str,
+        default=None,
+        help="Comma-separated list of symbols to backfill historical OHLCV data for.",
     )
     parser.add_argument(
         "--from-date",
@@ -90,6 +102,11 @@ def main() -> int:
         type=parse_date,
         default=None,
         help="End date for backfill in YYYY-MM-DD.",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not resume backfill from checkpoint; re-process all specified symbols.",
     )
     parser.add_argument(
         "--verbose",
@@ -126,28 +143,73 @@ def main() -> int:
             logger.error("Failed to check provider status: %s", exc)
             return 1
 
-    # Backfill symbol mode
-    if args.backfill_symbol:
-        if not args.from_date or not args.to_date:
-            logger.error("--from-date and --to-date are required when using --backfill-symbol")
+    # Catch-up mode
+    if args.catch_up:
+        service = EODUpdateService()
+        logger.info("Executing EOD catch-up sequence...")
+        results = service.run_catchup(dry_run=args.dry_run, min_coverage_threshold=args.min_coverage)
+        if not results:
+            print("\nDatabase is already up to date with the latest published provider trading date.")
+            return 0
+
+        print(f"\n================ CATCH-UP SUMMARY ({len(results)} session(s)) ================")
+        has_failure = False
+        has_partial = False
+        for res in results:
+            print(f"[{res.trading_date}] Status: {res.status.upper()} | Inserted: {res.records_inserted} | Updated: {res.records_updated} | Skipped: {res.records_skipped} | Failed: {res.records_failed}")
+            if res.status == "failed":
+                has_failure = True
+            elif res.status == "partial":
+                has_partial = True
+        print("========================================================================\n")
+        if has_failure:
             return 1
-        provider = TejHQProvider()
+        elif has_partial:
+            return 2
+        return 0
+
+    # Backfill mode
+    symbols_to_backfill: list[str] = []
+    if args.backfill_symbol:
+        symbols_to_backfill.append(args.backfill_symbol.strip().upper())
+    elif args.backfill_symbols:
+        symbols_to_backfill = [s.strip().upper() for s in args.backfill_symbols.split(",") if s.strip()]
+
+    if symbols_to_backfill:
+        if not args.from_date or not args.to_date:
+            logger.error("--from-date and --to-date are required when using --backfill-symbol / --backfill-symbols")
+            return 1
+
+        backfill_svc = HistoricalBackfillService()
         try:
             logger.info(
-                "Fetching historical OHLCV for %s from %s to %s...",
-                args.backfill_symbol,
+                "Backfilling %d symbol(s) from %s to %s...",
+                len(symbols_to_backfill),
                 args.from_date,
                 args.to_date,
             )
-            rows = provider.get_historical_ohlcv(
-                args.backfill_symbol, args.from_date, args.to_date
+            audit = backfill_svc.backfill_instruments(
+                symbols=symbols_to_backfill,
+                from_date=args.from_date,
+                to_date=args.to_date,
+                resume=not args.no_resume,
+                dry_run=args.dry_run,
             )
-            logger.info("Successfully fetched %d OHLCV rows for %s", len(rows), args.backfill_symbol)
-            for r in rows:
-                print(f"  {r.date}: Open={r.open}, High={r.high}, Low={r.low}, Close={r.close}, LTP={r.last_price}, Volume={r.volume}")
-            return 0
+            print("\n================ HISTORICAL BACKFILL REPORT ================")
+            print(f"Symbols Requested: {audit.symbols_requested}")
+            print(f"Symbols Completed: {audit.symbols_completed}")
+            print(f"Symbols Failed:    {audit.symbols_failed}")
+            print(f"Bars Read:         {audit.bars_read}")
+            print(f"Bars Inserted:     {audit.bars_inserted}")
+            print(f"Bars Updated:      {audit.bars_updated}")
+            print(f"Bars Skipped:      {audit.bars_skipped}")
+            print(f"Bars Failed:       {audit.bars_failed}")
+            if audit.failures:
+                print(f"First 5 Errors:    {audit.failures[:5]}")
+            print("============================================================\n")
+            return 0 if audit.symbols_failed == 0 else 1
         except Exception as exc:
-            logger.error("Historical OHLCV fetch failed: %s", exc)
+            logger.error("Historical backfill error: %s", exc)
             return 1
 
     # Daily EOD Update
@@ -183,3 +245,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

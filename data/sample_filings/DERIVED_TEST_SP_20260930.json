@@ -1,0 +1,12 @@
+[
+  {
+    "symbol": "WIPRO",
+    "series": "EQ",
+    "share_class": "EQUITY",
+    "quarter_ended": "2026-09-30",
+    "filing_date": "2026-10-15",
+    "paid_up_capital": 10486000000.0,
+    "face_value": 2.0,
+    "source_reference": "NSE_NEAPS_WIPRO_DERIVED"
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "symbol": "TCS",
+    "series": "EQ",
+    "share_class": "EQUITY",
+    "quarter_ended": "2026-09-30",
+    "filing_date": "2026-10-20",
+    "total_shares": 3618087520,
+    "fully_paid_shares": 3618087520,
+    "partly_paid_shares": 0,
+    "paid_up_capital": 3618087520.0,
+    "face_value": 1.0,
+    "source_reference": "NSE_NEAPS_TCS_Q2_FY27_REVISED"
+  }
+]

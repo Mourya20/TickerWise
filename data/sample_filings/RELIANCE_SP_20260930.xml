@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:in-bse-shp="http://www.bseindia.com/xbrl/shp/2020-03-31/in-bse-shp" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <in-bse-shp:ScripCode>500325</in-bse-shp:ScripCode>
+  <in-bse-shp:Symbol>RELIANCE</in-bse-shp:Symbol>
+  <in-bse-shp:NSE_Symbol>RELIANCE</in-bse-shp:NSE_Symbol>
+  <in-bse-shp:NameOfTheCompany>Reliance Industries Limited</in-bse-shp:NameOfTheCompany>
+  <in-bse-shp:ClassOfSecurity>Equity</in-bse-shp:ClassOfSecurity>
+  <in-bse-shp:QuarterEnded>2026-09-30</in-bse-shp:QuarterEnded>
+  <in-bse-shp:DateOfFiling>2026-10-15</in-bse-shp:DateOfFiling>
+  <in-bse-shp:FaceValuePerShare>10.00</in-bse-shp:FaceValuePerShare>
+  <in-bse-shp:PaidUpEquityShareCapital>67661000000.00</in-bse-shp:PaidUpEquityShareCapital>
+  <in-bse-shp:NumberOfFullyPaidUpEquityShares>6766100000</in-bse-shp:NumberOfFullyPaidUpEquityShares>
+  <in-bse-shp:NumberOfPartlyPaidUpShares>0</in-bse-shp:NumberOfPartlyPaidUpShares>
+  <in-bse-shp:TotalNumberOfShares>6766100000</in-bse-shp:TotalNumberOfShares>
+</xbrli:xbrl>

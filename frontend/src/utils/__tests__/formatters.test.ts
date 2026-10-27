@@ -5,6 +5,10 @@ import {
   formatPercentageChange,
   formatDate,
   parseDecimalNumber,
+  formatVolumeLakhs,
+  formatTradedValueCrores,
+  formatMarketCapCrores,
+  formatShareCount,
 } from '../formatters';
 
 describe('Formatters Utility', () => {
@@ -87,6 +91,49 @@ describe('Formatters Utility', () => {
     it('returns dash for null/empty date', () => {
       expect(formatDate(null)).toBe('—');
       expect(formatDate(undefined)).toBe('—');
+    });
+  });
+
+  describe('formatVolumeLakhs', () => {
+    it('formats volume in lakhs with unit', () => {
+      expect(formatVolumeLakhs('121.456')).toBe('121.46 lakh');
+      expect(formatVolumeLakhs(50)).toBe('50.00 lakh');
+    });
+
+    it('returns dash for missing volume', () => {
+      expect(formatVolumeLakhs(null)).toBe('—');
+      expect(formatVolumeLakhs(undefined)).toBe('—');
+    });
+  });
+
+  describe('formatTradedValueCrores', () => {
+    it('formats traded value with rupee symbol and Cr unit', () => {
+      expect(formatTradedValueCrores('2805.17')).toBe('₹2,805.17 Cr');
+    });
+
+    it('returns dash for missing value', () => {
+      expect(formatTradedValueCrores(null)).toBe('—');
+    });
+  });
+
+  describe('formatMarketCapCrores', () => {
+    it('formats market cap in crores with Indian number format', () => {
+      expect(formatMarketCapCrores('833932.99')).toBe('₹8,33,932.99 Cr');
+    });
+
+    it('returns dash for missing value', () => {
+      expect(formatMarketCapCrores(null)).toBe('—');
+    });
+  });
+
+  describe('formatShareCount', () => {
+    it('formats integer share count with Indian grouping', () => {
+      expect(formatShareCount(3618087520)).toBe('3,61,80,87,520');
+      expect(formatShareCount('6765751910')).toBe('6,76,57,51,910');
+    });
+
+    it('returns dash for missing share count', () => {
+      expect(formatShareCount(null)).toBe('—');
     });
   });
 });
