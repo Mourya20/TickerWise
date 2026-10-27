@@ -11,6 +11,7 @@ import httpx
 from app.core.config import settings
 from app.providers.base import (
     BaseMarketDataProvider,
+    NormalizedCorporateAction,
     NormalizedMarketSnapshot,
     NormalizedOHLCV,
     ProviderDataValidationError,
@@ -331,6 +332,60 @@ class TejHQProvider(BaseMarketDataProvider):
                     volume=volume,
                     turnover=turnover,
                     trades=trades,
+                )
+            )
+
+        return results
+
+    def get_actions(self, symbol: str) -> list[NormalizedCorporateAction]:
+        """Fetch historical corporate actions for a single symbol."""
+        clean_symbol = symbol.strip().upper()
+        payload = self._request_with_retry(
+            "GET",
+            f"/v1/actions/{clean_symbol}",
+        )
+
+        data_rows = payload.get("data")
+        if not isinstance(data_rows, list):
+            raise ProviderResponseError(
+                f"TejHQ actions response missing 'data' list for symbol {clean_symbol}"
+            )
+
+        results: list[NormalizedCorporateAction] = []
+        for row in data_rows:
+            if not isinstance(row, dict):
+                continue
+            ex_date_str = row.get("ex_date")
+            if not ex_date_str:
+                continue
+            try:
+                ex_date = datetime.strptime(str(ex_date_str), "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+            rec_date_str = row.get("record_date")
+            rec_date: date | None = None
+            if rec_date_str:
+                try:
+                    rec_date = datetime.strptime(str(rec_date_str), "%Y-%m-%d").date()
+                except ValueError:
+                    rec_date = None
+
+            results.append(
+                NormalizedCorporateAction(
+                    symbol=str(row.get("symbol", clean_symbol)).strip().upper(),
+                    exchange=str(row.get("exchange", "NSE")).strip().upper(),
+                    isin=str(row.get("isin", "")).strip().upper() or None,
+                    company_name=str(row.get("company", "")).strip() or None,
+                    ex_date=ex_date,
+                    record_date=rec_date,
+                    action_type=str(row.get("type", "other")).strip().lower(),
+                    ratio_num=_parse_int(row.get("ratio_num"), "ratio_num"),
+                    ratio_den=_parse_int(row.get("ratio_den"), "ratio_den"),
+                    cash_amount=_parse_decimal(row.get("cash_amount"), "cash_amount"),
+                    face_value_from=_parse_decimal(row.get("face_value_from"), "face_value_from"),
+                    face_value_to=_parse_decimal(row.get("face_value_to"), "face_value_to"),
+                    raw_subject=str(row.get("raw_subject", "")).strip() or None,
                 )
             )
 

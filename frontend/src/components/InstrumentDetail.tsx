@@ -5,8 +5,10 @@ import {
   formatDate,
   formatPercentageChange,
   formatPlainDecimal,
+  formatShareCount,
 } from '../utils/formatters';
 import { PlannedFeature } from './PlannedFeature';
+import { PriceChart } from './PriceChart';
 
 interface InstrumentDetailProps {
   instrument: InstrumentDetailResponse;
@@ -27,7 +29,7 @@ type TabKey =
 
 const TABS: { key: TabKey; label: string; isPlanned: boolean }[] = [
   { key: 'snapshot', label: 'Snapshot', isPlanned: false },
-  { key: 'prices', label: 'Prices', isPlanned: true },
+  { key: 'prices', label: 'Prices', isPlanned: false },
   { key: 'technical', label: 'Technical', isPlanned: true },
   { key: 'fundamentals', label: 'Fundamentals', isPlanned: true },
   { key: 'peers', label: 'Peers', isPlanned: true },
@@ -84,7 +86,7 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
           <span className="meta-dot">·</span>
           <span>{instrument.instrument_type}</span>
           <span className="meta-dot">·</span>
-          <span>{instrument.is_active ? 'TRADING ACTIVE' : 'SUSPENDED'}</span>
+          <span>{instrument.is_active ? 'MASTER LISTED' : 'MASTER SUSPENDED'}</span>
           {instrument.isin && (
             <>
               <span className="meta-dot">·</span>
@@ -100,16 +102,17 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
         </div>
       </div>
 
-      {/* Two-Column Historical Snapshot Notice Box */}
+      {/* Two-Column Market Data Notice Box */}
       <div className="historical-notice-box" role="status" aria-label="Market data notice">
         <div className="notice-box-left">
-          <strong>Historical</strong>
-          <strong>snapshot.</strong>
+          <strong>Market</strong>
+          <strong>Data.</strong>
         </div>
         <div className="notice-box-right">
           {snapshot ? (
             <p>
-              Data is dated {formatDate(snapshot.snapshot_date)} and comes from a manual import, not today's market. Automatic daily updates are planned, not active.
+              Daily data dated {formatDate(snapshot.snapshot_date)} sourced from {snapshot.source_name || 'historical market snapshot'}.
+              {snapshot.is_stale ? ' (Snapshot is stale, latest trading session may be pending).' : ' EOD updates active on trading days.'}
             </p>
           ) : (
             <p>
@@ -181,24 +184,66 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
                   <div className="metric-col-label">Market Capitalization</div>
                   <div className="metric-col-value">
                     {snapshot.market_capitalization_crores
-                      ? `${formatPlainDecimal(snapshot.market_capitalization_crores, 2)} Cr`
+                      ? `₹${formatPlainDecimal(snapshot.market_capitalization_crores, 2)} Cr`
                       : '— Cr'}
+                  </div>
+                  <div className="metric-subtext-provenance">
+                    {snapshot.market_capitalization_crores ? (
+                      <>
+                        <span title={snapshot.market_cap_explanation || undefined}>
+                          {snapshot.market_cap_price_basis || 'LTP'} ({formatDate(snapshot.market_cap_price_date || snapshot.snapshot_date)}) × {formatShareCount(snapshot.share_count)} shares
+                          {snapshot.share_count_date ? ` (${formatDate(snapshot.share_count_date)})` : ''}
+                        </span>
+                        {snapshot.share_count_status === 'stale' && (
+                          <span className="stale-badge" title="Share count filing is older than 120 days">Stale &gt;120d</span>
+                        )}
+                      </>
+                    ) : (
+                      <span>No dated share count</span>
+                    )}
                   </div>
                 </div>
 
                 <div className="metric-col">
                   <div className="metric-col-label">Volume</div>
                   <div className="metric-col-value">
-                    {formatPlainDecimal(snapshot.volume_lakhs, 2)} <span className="val-unit">lakh</span>
+                    {snapshot.volume_lakhs
+                      ? `${formatPlainDecimal(snapshot.volume_lakhs, 2)} lakh`
+                      : snapshot.volume != null
+                      ? `${formatPlainDecimal(snapshot.volume / 100000, 2)} lakh`
+                      : '— lakh'}
+                  </div>
+                  <div className="metric-subtext-provenance">
+                    {snapshot.volume != null ? (
+                      <span>{snapshot.volume.toLocaleString('en-IN')} shares</span>
+                    ) : (
+                      <span>—</span>
+                    )}
                   </div>
                 </div>
 
                 <div className="metric-col">
                   <div className="metric-col-label">Traded Value</div>
                   <div className="metric-col-value">
-                    {formatPlainDecimal(snapshot.traded_value_crores, 2)} <span className="val-unit">Cr</span>
+                    {snapshot.traded_value_crores
+                      ? `₹${formatPlainDecimal(snapshot.traded_value_crores, 2)} Cr`
+                      : snapshot.turnover != null
+                      ? `₹${formatPlainDecimal(parseFloat(String(snapshot.turnover)) / 10000000, 2)} Cr`
+                      : '— Cr'}
+                  </div>
+                  <div className="metric-subtext-provenance">
+                    {snapshot.turnover != null ? (
+                      <span>Turnover ₹{parseFloat(String(snapshot.turnover)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                    ) : (
+                      <span>—</span>
+                    )}
                   </div>
                 </div>
+              </div>
+
+              {/* Interactive Price & Volume Chart */}
+              <div className="snapshot-chart-container" style={{ marginTop: '24px' }}>
+                <PriceChart instrumentId={instrument.instrument_id} symbol={instrument.symbol} />
               </div>
             </div>
           ) : (
@@ -275,18 +320,17 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
         /* Planned Tab View */
         <div id={`tabpanel-${activeTab}`} role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
           {activeTab === 'prices' && (
-            <PlannedFeature
-              title={`${instrument.symbol} · Historical Daily Prices & OHLCV`}
-              description="Historical price series, daily adjusted close prices, trading volumes, and historical Bhavcopy verification will be available in Stage 2."
-              stageBadge="Stage 2: Historical OHLCV"
-              roadmapDetails={[
-                'Multi-year historical price series backfilling via TejHQ provider',
-                'Adjusted prices accounting for corporate actions and stock splits',
-                'Interactive candlestick charts with date-range filters',
-              ]}
-              backLink="#"
-              backText="← Back to Overview"
-            />
+            <div className="prices-tab-view" style={{ marginTop: '16px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px 0' }}>
+                  {instrument.symbol} · Historical Daily Prices &amp; Volume
+                </h2>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
+                  Interactive candlestick OHLCV and trading volume history.
+                </p>
+              </div>
+              <PriceChart instrumentId={instrument.instrument_id} symbol={instrument.symbol} />
+            </div>
           )}
 
           {activeTab === 'technical' && (

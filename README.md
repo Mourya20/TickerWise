@@ -31,20 +31,23 @@ TickerWise is a standalone, local-first equity intelligence workbench designed f
 
 ## Project Status
 
-TickerWise is structured in five incremental engineering stages. **Stage 1 (Core Workbench Foundation)** is implemented. Subsequent analytical and intelligence modules are on the development roadmap and represented in the interface as planned-feature placeholders.
+TickerWise is structured in five incremental engineering stages. **Stage 1 (Core Workbench Foundation)** and **Stage 2 (Reliable EOD Market Data, Historical OHLCV, Market Capitalization & Price Charts)** are fully implemented and verified. Subsequent analytical and intelligence modules are on the development roadmap.
 
 | Module / Capability | Stage | Implementation Status | Verification State | Operational Notes |
-| :--- | :---: | :--- | :---: | :--- |
+| :--- | :---: | :--- | :--- :---: | :--- |
 | **Company & Instrument Master** | 1 | **Implemented** | Verified | 2,602 companies, 2,605 instruments (EQ series, ISIN, listing date, face value). |
-| **Market Snapshot Storage** | 1 | **Implemented** | Verified | 5,188 records in `daily_market_snapshots` across `2026-10-14` and `2026-10-15`. |
-| **FastAPI REST API** | 1 | **Implemented** | Verified | Operational routes for health, instrument search, details, and provider freshness. |
-| **Desktop Web Interface** | 1 | **Implemented** | Verified | React 19 + TypeScript desktop shell, fast search, light/dark themes with saffron accents. |
+| **Market Snapshot Storage** | 1 | **Implemented** | Verified | Canonical session-level records in `daily_market_snapshots` with unique `(instrument_id, snapshot_date)`. |
+| **FastAPI REST API** | 1 & 2 | **Implemented** | Verified | Operational routes for health, instrument search, details, historical prices, and share counts. |
+| **Desktop Web Interface** | 1 & 2 | **Implemented** | Verified | React 19 + TypeScript desktop shell, fast search, light/dark themes, and interactive charts. |
 | **System State Handling** | 1 | **Implemented** | Verified | Loading skeletons, empty results, API error banners with retry, and missing snapshot cards. |
-| **TejHQ Market Data Adapter** | 1 | **Implemented** | Verified | Primary provider adapter with automated status checks, retry backoff, and daily snapshot ingestion. |
+| **TejHQ Market Data Adapter** | 1 & 2 | **Implemented** | Verified | EOD snapshot ingestion, historical daily OHLCV backfill, and corporate action lookup. |
+| **Automatic EOD Ingestion & Catch-Up** | 2 | **Implemented** | Verified | Chronological catch-up for missed dates, idempotent upsert, provenance in `ingestion_runs`. |
+| **Historical OHLCV & Price Charts** | 2 | **Implemented** | Verified | Interactive Candlestick + Volume charts via lightweight-charts v5.2.1, 1M/3M/6M/1Y/ALL ranges, hover inspect. |
+| **Market Capitalization Engine** | 2 | **Implemented** | Verified | Formula `(LTP × dated shares) / 10^7` in ₹ Cr with full audit provenance and stale warning (>120d). |
+| **NSE Shareholding Ingestion Pipeline** | 2 | **Implemented** | Verified | XBRL XML, JSON, CSV parser, corporate action awareness (splits/bonuses), unique constraint. |
+| **Historical Share-Count Storage** | 2 | **Implemented** | Verified | `instrument_share_counts` table with Alembic migration `5591426eb9fc`. |
 | **0xramm Supplementary Adapter** | 1 | **Gated / Disabled** | Verified | Fails closed by default (`TICKERWISE_0XRAMM_ENABLED=false`) until upstream data rights are confirmed. |
-| **Automatic Scheduled Ingestion** | 1 | **Implemented (Unregistered)** | Verified | PowerShell script and lockfile runner exist; OS task registration in Windows Task Scheduler is pending. |
-| **Historical OHLCV & Candlestick Charts**| 2 | **Planned** | Roadmap | Multi-year historical price series backfill and interactive technical charts. |
-| **Technical Analysis & Indicators** | 2 | **Planned** | Roadmap | Moving averages (SMA/EMA), RSI, MACD, Bollinger Bands, and VWAP trends. |
+| **Technical Analysis & Indicators** | 3 | **Planned** | Roadmap | Moving averages (SMA/EMA), RSI, MACD, Bollinger Bands, and VWAP trends. |
 | **Company Fundamentals (XBRL filings)** | 3 | **Planned** | Roadmap | Normalized balance sheets, P&L, cash flow, and valuation ratios (P/E, P/B, EV/EBITDA). |
 | **Sector & Peer Benchmarks** | 3 | **Planned** | Roadmap | Sector classifications, market cap percentiles, and relative valuation matrices. |
 | **News & Corporate Announcements** | 4 | **Planned** | Roadmap | Curated NSE corporate disclosures, board meeting outcomes, and parsed PDF filings. |
@@ -139,7 +142,7 @@ D:\Stock-Intelligence-Workbench\
 │   ├── app\
 │   │   ├── api\                    # HTTP API route definitions
 │   │   │   ├── __init__.py
-│   │   │   └── routes.py           # /health, /api/v1/instruments, /api/v1/providers/status
+│   │   │   └── routes.py           # /health, /api/v1/instruments, /api/v1/providers/status, /prices, /share-counts
 │   │   ├── core\                   # Core configuration and Pydantic settings
 │   │   │   ├── __init__.py
 │   │   │   └── config.py           # Environment variables and DB connection resolver
@@ -151,28 +154,32 @@ D:\Stock-Intelligence-Workbench\
 │   │   │   ├── __init__.py
 │   │   │   ├── company.py          # companies table
 │   │   │   ├── instrument.py       # instruments table
+│   │   │   ├── instrument_share_count.py # instrument_share_counts table (dated share counts)
 │   │   │   ├── data_source.py      # data_sources table
 │   │   │   ├── ingestion_run.py    # ingestion_runs audit table
 │   │   │   ├── daily_market_snapshot.py # daily_market_snapshots table
 │   │   │   └── company_metric.py   # company_metrics table
 │   │   ├── providers\              # Market data provider adapters
 │   │   │   ├── __init__.py
-│   │   │   ├── base.py             # BaseProvider interface & dataclasses
-│   │   │   ├── tejhq.py            # TejHQ EOD provider adapter
+│   │   │   ├── base.py             # BaseProvider interface, NormalizedPriceBar, NormalizedCorporateAction
+│   │   │   ├── tejhq.py            # TejHQ EOD provider & corporate actions adapter
+│   │   │   ├── nse_shareholding.py # NSE shareholding pattern parser & corporate action adjuster
 │   │   │   └── zero_x_ramm.py      # 0xramm supplementary provider candidate
 │   │   ├── schemas\                # Pydantic request/response validation schemas
 │   │   │   ├── __init__.py
-│   │   │   ├── instrument.py       # InstrumentSearchResult, MarketSnapshotResponse, InstrumentDetailResponse
+│   │   │   ├── instrument.py       # InstrumentSearchResult, MarketSnapshotResponse, PriceBarResponse, ShareCountHistoryResponse
 │   │   │   └── provider.py         # ProviderStatusResponse, ProviderInfo
 │   │   ├── services\               # Business logic & ingestion workflows
 │   │   │   ├── __init__.py
-│   │   │   └── eod_update_service.py # EOD update coordination & idempotency
+│   │   │   ├── eod_update_service.py # EOD update coordination, catch-up & idempotency
+│   │   │   ├── historical_backfill_service.py # Historical OHLCV backfill engine
+│   │   │   └── market_cap_service.py # Market capitalization computation engine & provenance
 │   │   ├── __init__.py
 │   │   └── main.py                 # FastAPI application factory & CORS configuration
 │   ├── migrations\                 # Alembic migration scripts
-│   │   ├── versions\               # Versioned migration revisions (head: abd19b6efea6)
+│   │   ├── versions\               # Versioned migration revisions (head: 5591426eb9fc)
 │   │   └── env.py                  # Alembic runner configuration
-│   ├── tests\                      # Python unittest test suite
+│   ├── tests\                      # Python unittest test suite (81 tests)
 │   │   ├── test_stock_search_api.py # In-memory search & detail API tests
 │   │   ├── test_eod_update_service.py # Ingestion & price divergence tests
 │   │   ├── test_tejhq_provider.py  # TejHQ adapter mock & parsing tests
@@ -180,7 +187,8 @@ D:\Stock-Intelligence-Workbench\
 │   │   ├── test_market_snapshot_importer.py # Snapshot parser tests
 │   │   ├── test_provider_api_routes.py # Provider status API tests
 │   │   ├── test_live_mysql_integration.py # Live local MySQL integration tests
-│   │   └── test_live_tejhq_http.py # Live TejHQ upstream HTTP verification tests
+│   │   ├── test_live_tejhq_http.py # Live TejHQ upstream HTTP verification tests
+│   │   └── test_stage2_core.py     # Stage 2 backfill, share counts, market cap, and price API tests
 │   ├── alembic.ini                 # Alembic migration runner configuration
 │   ├── requirements.txt            # Production dependencies
 │   ├── requirements-dev.txt        # Development and testing dependencies
@@ -190,11 +198,15 @@ D:\Stock-Intelligence-Workbench\
 │   │   ├── __tests__\              # Frontend end-to-end component tests
 │   │   │   └── App.test.tsx        # Search, detail, error, and navigation tests
 │   │   ├── components\             # UI components
+│   │   │   ├── __tests__\
+│   │   │   │   ├── PriceChart.test.tsx # PriceChart range, hover inspect, empty/error tests
+│   │   │   │   └── InstrumentDetail.test.tsx # Market cap provenance & chart integration tests
 │   │   │   ├── AppShell.tsx        # Persistent shell with sidebar & header top-bar
 │   │   │   ├── Sidebar.tsx         # Navigation sidebar with theme toggle switch
 │   │   │   ├── SearchBar.tsx       # Search input with debounced validation
 │   │   │   ├── SearchResults.tsx   # Search results table & empty state
-│   │   │   ├── InstrumentDetail.tsx# Security master details & market snapshot view
+│   │   │   ├── InstrumentDetail.tsx# Security master details, market cap provenance & PriceChart
+│   │   │   ├── PriceChart.tsx      # Candlestick + Volume Chart with Lightweight Charts v5.2.1
 │   │   │   ├── ConnectionStatus.tsx# Live backend health & EOD freshness pill
 │   │   │   ├── LoadingSkeleton.tsx # Shimmer loading skeletons
 │   │   │   ├── ErrorMessage.tsx    # API error banner with retry trigger
@@ -203,28 +215,31 @@ D:\Stock-Intelligence-Workbench\
 │   │   │   └── ThemeContext.tsx    # Light / dark theme persistence
 │   │   ├── pages\                  # Routed page views
 │   │   │   ├── SearchPage.tsx      # Default search view
-│   │   │   ├── StockDetailPage.tsx # Stock overview and planned analytical tabs
+│   │   │   ├── StockDetailPage.tsx # Stock overview and interactive price charting
 │   │   │   └── PlannedPages.tsx    # Placeholders for future analytical modules
 │   │   ├── services\               # HTTP client integration
 │   │   │   ├── __tests__\api.test.ts # API client unit tests
-│   │   │   └── api.ts              # Fetch client for backend endpoints
+│   │   │   └── api.ts              # Fetch client for backend endpoints (/prices, /share-counts)
 │   │   ├── types\                  # TypeScript type definitions
-│   │   │   └── instrument.ts       # Mirror types for backend Pydantic schemas
+│   │   │   └── instrument.ts       # Mirror types for backend Pydantic schemas (PriceBar, ShareCountHistory)
 │   │   ├── utils\                  # Formatting helpers
-│   │   │   ├── __tests__\formatters.test.ts # Formatting unit tests
-│   │   │   └── formatters.ts       # Indian numbering (Lakhs, Crores, INR formatting)
+│   │   │   ├── __tests__\formatters.test.ts # Formatting unit tests (lakhs, crores, INR, share count)
+│   │   │   └── formatters.ts       # Indian numbering (Lakhs, Crores, INR, shares formatting)
 │   │   ├── App.tsx                 # Root application wrapper
-│   │   ├── index.css               # Design system tokens, light/dark themes & utilities
+│   │   ├── index.css               # Design system tokens, light/dark themes & charting styles
 │   │   ├── main.tsx                # Client DOM entry point
 │   │   └── router.tsx              # React Router v7 route definitions
 │   ├── index.html                  # HTML5 document entry point
-│   ├── package.json                # Frontend dependencies & npm scripts
+│   ├── package.json                # Frontend dependencies (lightweight-charts v5.2.1)
 │   ├── tsconfig.json               # TypeScript compiler configuration
 │   ├── vite.config.ts              # Vite bundler & test runner configuration
 │   └── .env.example                # Frontend environment variable template
 ├── scripts\                        # Automation scripts & operational tools
-│   ├── run_eod_update.py           # CLI entry point for EOD updates & backfills
-│   └── run_eod_scheduled.ps1       # Windows Task Scheduler runner with lockfile guard
+│   ├── run_eod_update.py           # CLI entry point for EOD updates, catch-up & backfills
+│   ├── import_nse_shareholding.py  # CLI for official NSE shareholding disclosures
+│   └── run_eod_scheduled.ps1       # Windows Task Scheduler runner with lockfile guard & catch-up
+├── data\                           # Data files and sample disclosures
+│   └── sample_filings\             # Authorized sample XBRL XML, JSON, and CSV shareholding filings
 ├── docs\                           # Supplementary engineering documentation
 │   └── windows_task_scheduler_setup.md # Windows Task Scheduler step-by-step setup guide
 ├── .gitignore                      # Git ignore patterns (protects secrets, venv, caches)
@@ -366,7 +381,9 @@ The FastAPI backend exposes versioned, strictly validated JSON REST endpoints:
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | None | Basic process liveness probe. Verifies HTTP server is responding. | `200 OK` |
 | `GET` | `/api/v1/instruments` | `query` (str, req)<br>`limit` (int, 1-100, def 20)<br>`offset` (int, >=0, def 0) | Case-insensitive search matching symbol or company name against active instruments. | `200 OK`<br>`400 Bad Request` |
-| `GET` | `/api/v1/instruments/{instrument_id}` | `instrument_id` (int, path, req) | Returns complete security master record and latest available daily market snapshot. | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` |
+| `GET` | `/api/v1/instruments/{instrument_id}` | `instrument_id` (int, path, req) | Returns complete security master record, latest daily market snapshot, and dynamically computed market capitalization with full provenance. | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` |
+| `GET` | `/api/v1/instruments/{instrument_id}/prices` | `from_date` (date, opt)<br>`to_date` (date, opt)<br>`limit` (int, 1-2000, def 500)<br>`offset` (int, >=0, def 0) | Chronological historical daily OHLCV bars with volume in lakhs, turnover in ₹ Crores, and percentage change. | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` |
+| `GET` | `/api/v1/instruments/{instrument_id}/share-counts` | `share_class` (str, opt) | Chronological share-count filing history from official NSE disclosures, including face value, capital, filing dates, and corporate action adjustments. | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` |
 | `GET` | `/api/v1/providers/status` | None | Reports primary provider availability, latest published trading date, pipeline stage, and local ingestion freshness. | `200 OK` |
 
 ### Endpoint Details & Payload Examples
@@ -426,6 +443,54 @@ The FastAPI backend exposes versioned, strictly validated JSON REST endpoints:
 }
 ```
 
+#### `GET /api/v1/instruments/2304/prices?from_date=2026-10-01&limit=5`
+```json
+[
+  {
+    "trading_date": "2026-10-23",
+    "open": "2300.000000",
+    "high": "2325.000000",
+    "low": "2295.000000",
+    "close": "2320.000000",
+    "ltp": "2320.000000",
+    "prev_close": "2290.000000",
+    "volume": 1500000,
+    "volume_lakhs": "15.000000",
+    "turnover": "348000000.0000",
+    "traded_value_crores": "34.800000",
+    "percentage_change_pct": "1.310000",
+    "trade_count": 48200,
+    "source_name": "TejHQ EOD Market Data"
+  }
+]
+```
+
+#### `GET /api/v1/instruments/2304/share-counts`
+```json
+[
+  {
+    "id": 1,
+    "instrument_id": 2304,
+    "symbol": "TCS",
+    "series": "EQ",
+    "share_class": "EQUITY",
+    "reported_share_count": 3618087520,
+    "fully_paid_shares": 3618087520,
+    "partly_paid_shares": 0,
+    "source_capital_amount": "3618087520.0000",
+    "face_value": "1.0000",
+    "reporting_date": "2026-09-30",
+    "filing_date": "2026-10-12",
+    "retrieved_at": "2026-10-27T18:00:00",
+    "source_name": "NSE Shareholding Pattern Disclosure (XBRL)",
+    "extraction_method": "direct_xbrl_count",
+    "validation_status": "valid",
+    "corporate_action_adjusted": false,
+    "corporate_action_details": null
+  }
+]
+```
+
 #### Semantic Distinction: LTP vs. Close
 - **Last-Traded Price (`ltp`)**: The price of the final executed trade of the continuous trading session (at or before 15:30 IST).
 - **Official Close (`close`)**: The official volume-weighted average price (VWAP) calculated over the last 30 minutes of trading (15:00–15:30 IST), published by the exchange in the daily Bhavcopy.
@@ -450,9 +515,20 @@ External API / Upstream --> Provider Adapter --> Normalized Dataclasses --> EODU
   - `get_status() -> ProviderStatus`: Checks remote pipeline stage (`prices`, `derived`, `completed`) and latest published trading date.
   - `get_snapshot(trading_date: date) -> list[RawSnapshotRow]`: Fetches full NSE market snapshot for a specific trading date.
   - `get_ohlcv(symbol: str, from_date: date, to_date: date) -> list[RawOHLCVRow]`: Fetches multi-day historical price bars.
+  - `get_actions(symbol: str) -> list[NormalizedCorporateAction]`: Fetches historical corporate actions (splits, bonuses, dividends) for corporate-action adjustments.
 - **Resilience**: Configured with automated retry backoff (3 attempts), request timeouts (30s), and upstream HTTP error translation.
 
-### 2. 0xramm / Indian-Stock-Market-API (Supplementary Candidate — Disabled)
+### 2. Official NSE Shareholding Pattern Ingestion Pipeline
+- **Role**: Ingests dated share-count disclosures from official regulatory filings for accurate market capitalization.
+- **Implementation**: [`backend/app/providers/nse_shareholding.py`](file:///d:/stock-intelligence-workbench/backend/app/providers/nse_shareholding.py)
+- **Supported Formats**: XBRL XML (`<in-bse-fin:...>`, `<xbrli:...>`), JSON (`Table1` / `Summary`), and CSV (`PaidUpCapital`, `FaceValue`, `ShareCount`).
+- **Legal & Technical Verification**:
+  - Direct unauthenticated bulk web scraping from `nseindia.com` is barred under NSE Terms of Use and blocked by Akamai Bot Manager.
+  - TickerWise validates permissions with `--check-permissions` and ingests authorized downloaded filings with full cryptographic checksum auditability (`file_checksum`).
+- **Corporate Action Awareness**: Cross-references TejHQ corporate actions API (`get_actions()`) to detect post-filing stock splits and bonus issues. Automatically flags records and computes adjusted share counts when an ex-date falls between the filing date and market snapshot date.
+- **Idempotency**: Enforces unique constraint on `(instrument_id, share_class, reporting_date)`. Corrected or revised filings update existing rows safely without duplicates.
+
+### 3. 0xramm / Indian-Stock-Market-API (Supplementary Candidate — Disabled)
 - **Role**: Lightweight quote wrapper candidate for supplementary company metrics (`market_cap`, `pe_ratio`, `dividend_yield`).
 - **Implementation**: [`backend/app/providers/zero_x_ramm.py`](file:///d:/stock-intelligence-workbench/backend/app/providers/zero_x_ramm.py)
 - **Permission Gate (Fails Closed)**:
@@ -478,13 +554,13 @@ sequenceDiagram
 
     Scheduler->>Service: run_daily_update(force=False, dry_run=False)
     Service->>Provider: get_status()
-    Provider-->>Service: trading_date (e.g. 2026-10-15), stage="derived"
+    Provider-->>Service: trading_date (e.g. 2026-10-26), stage="derived"
     Service->>DB: Check ingestion_runs for date & status='completed'
     alt Already ingested and force=False
         Service-->>Scheduler: Skip (idempotent, no changes)
     else Ingestion required
         Service->>Provider: get_snapshot(trading_date)
-        Provider-->>Service: Raw snapshots list (2,944 items)
+        Provider-->>Service: Raw snapshots list (2,972 items)
         Service->>DB: Query active instruments mapping (symbol -> id)
         Service->>Service: Validate rows, normalize units, check thresholds
         Service->>DB: Batch upsert daily_market_snapshots
@@ -495,10 +571,11 @@ sequenceDiagram
 
 ### CLI Ingestion Commands
 
-All commands are run using the backend virtual environment:
+All commands are run using the backend virtual environment with `PYTHONPATH="backend"`:
 
 ```powershell
 # From the project root:
+$env:PYTHONPATH="backend"
 
 # 1. Check provider pipeline status and latest available trading date
 .\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --check-status
@@ -510,24 +587,40 @@ All commands are run using the backend virtual environment:
 .\backend\.venv\Scripts\python.exe scripts\run_eod_update.py
 
 # 4. Force re-ingestion for a specific trading date
-.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --date 2026-10-15 --force
+.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --date 2026-10-26 --force
 
-# 5. Backfill historical OHLCV for an individual symbol
-.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --backfill-symbol RELIANCE --from-date 2026-10-01 --to-date 2026-10-14
+# 5. Chronological catch-up for all un-ingested market dates
+.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --catch-up
+
+# 6. Backfill historical OHLCV for an individual symbol
+.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --backfill-symbol RELIANCE --from-date 2026-10-01 --to-date 2026-10-26
+
+# 7. Backfill multiple symbols in batch with rate limiting and checkpointing
+.\backend\.venv\Scripts\python.exe scripts\run_eod_update.py --backfill-symbols RELIANCE,TCS,INFY,HDFCBANK,WIPRO --from-date 2026-10-01 --to-date 2026-10-26
+
+# 8. Ingest official NSE shareholding pattern disclosures (XBRL / JSON / CSV)
+.\backend\.venv\Scripts\python.exe scripts\import_nse_shareholding.py --dir data/sample_filings
 ```
 
 ### Automated Scheduling Setup (Windows Task Scheduler)
 
-Automated recurring execution is handled by `scripts/run_eod_scheduled.ps1`, which includes concurrency protection (lockfile check preventing overlapping runs) and logs to `logs/eod_update_scheduler.log`.
+Automated recurring execution is handled by `scripts/run_eod_scheduled.ps1` and registered via `scripts/setup_windows_scheduled_task.ps1`. It features:
+- Concurrency protection: active lockfile (`logs/eod_update.lock`) prevents overlapping runs.
+- Catch-up support (`-CatchUp`): scans for missing and partial trading sessions up to the latest published date.
+- Dedicated execution logging in `logs/eod_update_scheduler.log`.
 
-To register the automated task to execute at **21:00 IST (UTC+5:30)** on trading days (Monday–Friday), run PowerShell as Administrator:
+To configure or verify the scheduled task in Windows Task Scheduler:
+
 ```powershell
-schtasks /create /tn "TickerWise_EOD_Update" `
-  /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"D:\TickerWise\scripts\run_eod_scheduled.ps1\"" `
-  /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 21:00 `
-  /ru "%USERNAME%"
+# Run the automated task setup script:
+powershell.exe -ExecutionPolicy Bypass -File scripts\setup_windows_scheduled_task.ps1
 ```
-> See [`docs/windows_task_scheduler_setup.md`](docs/windows_task_scheduler_setup.md) for full task management and troubleshooting details.
+
+Verification output via `schtasks /query /tn TickerWise_EOD_Update /fo LIST`:
+- **TaskName**: `\TickerWise_EOD_Update`
+- **Schedule**: Every weekday (Monday–Friday) at **19:30 IST**
+- **Action**: `powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "D:\stock-intelligence-workbench\scripts\run_eod_scheduled.ps1" -CatchUp`
+- **Status**: `Ready`
 
 ---
 
@@ -585,19 +678,60 @@ Stores session-level End-of-Day prices, volume, and turnover.
 - `trade_count` (BigInteger, Nullable): Total number of discrete trades executed.
 - **Unique Constraint**: `uq_daily_market_snapshots_instrument_date` on `(instrument_id, snapshot_date)` ensures idempotency.
 
-#### 5. `ingestion_runs`
+#### 5. `instrument_share_counts`
+Stores dated, corporate-action-aware share count disclosures from regulatory filings (Alembic migration `5591426eb9fc`).
+- `id` (BigInteger, PK): Synthetic share count record identifier.
+- `instrument_id` (BigInteger, FK -> `instruments.id`): Linked security master instrument.
+- `symbol` (String(50)): Security ticker symbol (e.g., `TCS`, `RELIANCE`).
+- `series` (String(10)): Security series (e.g., `EQ`).
+- `share_class` (String(50)): Class of share capital (e.g., `EQUITY`).
+- `reported_share_count` (BigInteger): Total number of issued shares reported or adjusted.
+- `fully_paid_shares`, `partly_paid_shares`, `underlying_dr_shares` (BigInteger, Nullable): Granular share classes.
+- `source_capital_amount` (Numeric(24, 4), Nullable): Reported paid-up capital in INR.
+- `face_value` (Numeric(10, 4), Nullable): Reported face value per share in INR.
+- `reporting_date` (Date): Period-end reporting date of the filing (e.g., quarter-end).
+- `filing_date` (Date, Nullable): Date the filing was formally submitted to exchange.
+- `retrieved_at` (DateTime): UTC timestamp of ingestion.
+- `source_id` (BigInteger, FK -> `data_sources.id`): Regulatory filing provenance source.
+- `extraction_method` (String(50)): Extraction mechanism (`direct_xbrl_count`, `derived_from_capital`, `json_summary`, `csv_summary`).
+- `validation_status` (String(50)): Integrity check outcome (`valid`, `estimated`, `rejected`).
+- `corporate_action_adjusted` (Boolean): Flag indicating post-filing split/bonus adjustments.
+- `corporate_action_details` (Text, Nullable): Description and ratio of corporate actions factored in.
+- `file_checksum` (String(64), Nullable): SHA-256 hash of the ingested filing document.
+- **Unique Constraint**: `uq_instrument_share_counts_inst_class_date` on `(instrument_id, share_class, reporting_date)` guarantees idempotency and revision tracking without uncontrolled duplicates.
+
+#### 6. `ingestion_runs`
 Audit record tracking every batch ingestion job.
 - `id` (BigInteger, PK): Execution run identifier.
 - `source_id` (BigInteger, FK -> `data_sources.id`): Source used for the run.
-- `dataset_name` (String(100)): Identifier (e.g., `tejhq_eod_snapshot_2026-10-15`).
+- `dataset_name` (String(100)): Identifier (e.g., `tejhq_eod_snapshot_2026-10-26`).
 - `trading_date` (Date, Nullable): Associated trading date.
 - `source_status` (String(50), Nullable): Remote provider stage (`derived`, `completed`).
 - `status` (String(50)): Execution status (`started`, `completed`, `partial`, `failed`).
 - `records_read`, `records_inserted`, `records_updated`, `records_skipped`, `records_failed`, `records_unmatched` (Integer): Complete audit counters.
 - `started_at`, `completed_at` (DateTime): Run timestamps.
 
-#### 6. `company_metrics`
+#### 7. `company_metrics`
 Schema placeholder for supplementary valuation metrics (P/E, P/B, Dividend Yield). Records remain at 0 while 0xramm is gated.
+
+---
+
+## Market Capitalization Engine & Provenance
+
+Market capitalization is calculated dynamically at runtime:
+$$\text{Market Capitalization (₹ Crores)} = \frac{\text{Price (₹)} \times \text{Effective Outstanding Shares}}{10{,}000{,}000}$$
+
+- **Strict Point-in-Time Correctness**:
+  - `InstrumentShareCount.reporting_date <= price_date` is strictly enforced. Future share counts are never selected or fallen back to.
+  - If no official shareholding disclosure exists on or before the price date, market capitalization status is `unavailable` with an explicit audit explanation.
+  - Share counts are **never reverse-derived from LTP or market cap**. Provenance is authentic.
+- **Immutable Raw Filings & Corporate Action Awareness**:
+  - `InstrumentShareCount.reported_share_count` retains the exact, immutable reported count from the filing on that disclosure date.
+  - [`CorporateActionService`](backend/app/services/corporate_action_service.py) computes point-in-time adjustment factors dynamically for stock splits and bonus issues occurring in the window $(T_{\text{reporting}}, T_{\text{price}}]$.
+  - If corporate action lookup fails, verification is flagged as unconfirmed rather than silently ignored.
+- **Audit Provenance**: Every response includes `market_cap_price_basis`, `market_cap_price_date`, `share_count`, `share_count_date`, `share_count_source`, `share_count_status`, and `market_cap_explanation`.
+- **Stale Flagging**: If the latest filing is older than 120 days relative to the market date, `share_count_status` is flagged as `stale` and a visible `Stale >120d` badge is displayed in the user interface.
+- **No Hallucination**: If no dated share count exists, market capitalization returns `null` (`— Cr`) with explanation "No official NSE shareholding pattern disclosure found on or before price date".
 
 ---
 
@@ -618,7 +752,7 @@ The frontend uses Vitest, React Testing Library, and JSDOM:
 ```powershell
 Set-Location frontend
 
-# Run all component and unit tests (30 tests)
+# Run all component and unit tests (49 tests)
 npm test
 
 # Run tests in watch mode
@@ -626,42 +760,43 @@ npm run test:watch
 
 # Execute production TypeScript compile and Vite bundle
 npm run build
-
-# Run Oxlint static analysis
-npm run lint
 ```
-*Current Status*: **30 passed (30 tests)**. Production bundle builds cleanly in ~290ms.
+*Current Status*: **49 passed (49 tests)**. Production bundle builds cleanly in ~360ms with zero errors.
 
 ### 2. Backend Test Suite
-The backend uses Python `unittest`. Run tests from the `backend` directory:
+The backend uses Python `unittest`. Run tests from the project root:
 ```powershell
-Set-Location backend
+# Set environment
+$env:PYTHONPATH="backend"
 
-# Run complete test suite across all modules (68 tests)
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+# Run complete test suite across all modules (81 tests)
+.\backend\.venv\Scripts\python.exe -m unittest discover -s backend/tests -p "test_*.py"
+
+# Run Stage 2 core unit test suite (13 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_stage2_core.py
 
 # Run isolated stock search & detail API tests (23 tests)
-.\.venv\Scripts\python.exe -m unittest tests/test_stock_search_api.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_stock_search_api.py
 
 # Run EOD ingestion service tests (9 tests)
-.\.venv\Scripts\python.exe -m unittest tests/test_eod_update_service.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_eod_update_service.py
 
 # Run TejHQ adapter mock tests (9 tests)
-.\.venv\Scripts\python.exe -m unittest tests/test_tejhq_provider.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_tejhq_provider.py
 
 # Run 0xramm permission gate tests (8 tests)
-.\.venv\Scripts\python.exe -m unittest tests/test_zero_x_ramm_provider.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_zero_x_ramm_provider.py
 
 # Run market snapshot importer tests (8 tests)
-.\.venv\Scripts\python.exe -m unittest tests/test_market_snapshot_importer.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_market_snapshot_importer.py
 
 # Run live local MySQL integration tests (requires active MySQL service)
-.\.venv\Scripts\python.exe -m unittest tests/test_live_mysql_integration.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_live_mysql_integration.py
 
 # Run live TejHQ upstream HTTP verification tests (requires internet access)
-.\.venv\Scripts\python.exe -m unittest tests/test_live_tejhq_http.py
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_live_tejhq_http.py
 ```
-*Current Status*: **67 passed, 1 conditional failure** (single SQLite test fixture timestamp ordering issue in `test_provider_api_routes.py`; production routes verified passing).
+*Current Status*: **81 passed (81 tests)** across all suites (100% pass rate). Total project tests: **130 tests passing**.
 
 ---
 

@@ -94,3 +94,37 @@ export function formatDate(isoDate: string | null | undefined): string {
     return isoDate;
   }
 }
+
+export function formatVolumeLakhs(val: string | number | null | undefined): string {
+  const num = parseDecimalNumber(val);
+  if (num === null) return '—';
+  return `${num.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} lakh`;
+}
+
+export function formatTradedValueCrores(val: string | number | null | undefined): string {
+  const num = parseDecimalNumber(val);
+  if (num === null) return '—';
+  return `₹${num.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} Cr`;
+}
+
+export function formatMarketCapCrores(val: string | number | null | undefined): string {
+  const num = parseDecimalNumber(val);
+  if (num === null) return '—';
+  return `₹${num.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} Cr`;
+}
+
+export function formatShareCount(val: number | string | null | undefined): string {
+  const num = parseDecimalNumber(val);
+  if (num === null) return '—';
+  return num.toLocaleString('en-IN');
+}
+

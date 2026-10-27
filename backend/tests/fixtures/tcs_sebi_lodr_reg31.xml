@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xbrli:xbrl
+  xmlns:xbrli="http://www.xbrl.org/2003/instance"
+  xmlns:in-bse-shp="http://www.bseindia.com/xbrl/shp/2015-12-31/in-bse-shp"
+  xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+  xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+
+  <xbrli:unit id="shares">
+    <xbrli:measure>xbrli:shares</xbrli:measure>
+  </xbrli:unit>
+  <xbrli:unit id="INR">
+    <xbrli:measure>iso4217:INR</xbrli:measure>
+  </xbrli:unit>
+
+  <!-- Non-segmented Entity Context (Entire Company) -->
+  <xbrli:context id="I_2026_Total">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">TCS</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:instant>2026-09-30</xbrli:instant>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Segmented Context: Promoter & Promoter Group -->
+  <xbrli:context id="I_2026_Promoter">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">TCS</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="in-bse-shp:ShareholderCategoryAxis">in-bse-shp:PromoterAndPromoterGroupMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:instant>2026-09-30</xbrli:instant>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Segmented Context: Public Shareholder -->
+  <xbrli:context id="I_2026_Public">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">TCS</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="in-bse-shp:ShareholderCategoryAxis">in-bse-shp:PublicShareholderMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:instant>2026-09-30</xbrli:instant>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- General Company Information -->
+  <in-bse-shp:Symbol contextRef="I_2026_Total">TCS</in-bse-shp:Symbol>
+  <in-bse-shp:ScripCode contextRef="I_2026_Total">532540</in-bse-shp:ScripCode>
+  <in-bse-shp:NameOfTheCompany contextRef="I_2026_Total">Tata Consultancy Services Limited</in-bse-shp:NameOfTheCompany>
+  <in-bse-shp:ClassOfSecurity contextRef="I_2026_Total">Equity</in-bse-shp:ClassOfSecurity>
+  <in-bse-shp:QuarterEnded contextRef="I_2026_Total">2026-09-30</in-bse-shp:QuarterEnded>
+  <in-bse-shp:DateOfFiling contextRef="I_2026_Total">2026-10-12</in-bse-shp:DateOfFiling>
+  <in-bse-shp:FaceValuePerShare contextRef="I_2026_Total" unitRef="INR" decimals="2">1.00</in-bse-shp:FaceValuePerShare>
+  <in-bse-shp:PaidUpEquityShareCapital contextRef="I_2026_Total" unitRef="INR" decimals="0">3618087518</in-bse-shp:PaidUpEquityShareCapital>
+
+  <!-- Total Entity Level Shares -->
+  <in-bse-shp:TotalNumberOfShares contextRef="I_2026_Total" unitRef="shares" decimals="0">3618087518</in-bse-shp:TotalNumberOfShares>
+  <in-bse-shp:NumberOfFullyPaidUpEquityShares contextRef="I_2026_Total" unitRef="shares" decimals="0">3618087518</in-bse-shp:NumberOfFullyPaidUpEquityShares>
+
+  <!-- Dimensional Facts (must NOT overwrite the Entity Level total) -->
+  <in-bse-shp:TotalNumberOfShares contextRef="I_2026_Promoter" unitRef="shares" decimals="0">2604245600</in-bse-shp:TotalNumberOfShares>
+  <in-bse-shp:NumberOfFullyPaidUpEquityShares contextRef="I_2026_Promoter" unitRef="shares" decimals="0">2604245600</in-bse-shp:NumberOfFullyPaidUpEquityShares>
+  <in-bse-shp:TotalNumberOfShares contextRef="I_2026_Public" unitRef="shares" decimals="0">1013841918</in-bse-shp:TotalNumberOfShares>
+  <in-bse-shp:NumberOfFullyPaidUpEquityShares contextRef="I_2026_Public" unitRef="shares" decimals="0">1013841918</in-bse-shp:NumberOfFullyPaidUpEquityShares>
+
+</xbrli:xbrl>

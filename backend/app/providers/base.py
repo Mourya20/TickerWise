@@ -121,6 +121,25 @@ class ProviderStatus:
     raw_metadata: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class NormalizedCorporateAction:
+    """Canonical representation of an exchange corporate action (split, bonus, dividend, etc.)."""
+
+    symbol: str
+    exchange: str
+    isin: str | None
+    company_name: str | None
+    ex_date: date
+    record_date: date | None
+    action_type: str  # dividend, split, bonus, rights, etc.
+    ratio_num: int | None = None
+    ratio_den: int | None = None
+    cash_amount: Decimal | None = None
+    face_value_from: Decimal | None = None
+    face_value_to: Decimal | None = None
+    raw_subject: str | None = None
+
+
 class BaseMarketDataProvider(ABC):
     """Abstract interface that all market data providers must implement."""
 
@@ -142,3 +161,8 @@ class BaseMarketDataProvider(ABC):
     ) -> list[NormalizedOHLCV]:
         """Fetch historical daily OHLCV rows for a single symbol over a date range."""
         raise NotImplementedError
+
+    def get_actions(self, symbol: str) -> list[NormalizedCorporateAction]:
+        """Fetch corporate actions for a single symbol."""
+        return []
+

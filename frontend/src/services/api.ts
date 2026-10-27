@@ -1,7 +1,9 @@
 import type {
   InstrumentDetailResponse,
   InstrumentSearchResult,
+  PriceBar,
   ProviderStatusResponse,
+  ShareCountHistory,
 } from '../types/instrument';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8000';
@@ -167,3 +169,75 @@ export async function getInstrumentDetail(
     );
   }
 }
+
+export async function getInstrumentPrices(
+  instrumentId: number,
+  fromDate?: string,
+  toDate?: string,
+  limit: number = 500,
+  signal?: AbortSignal
+): Promise<PriceBar[]> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const params = new URLSearchParams();
+  if (fromDate) params.set('from', fromDate);
+  if (toDate) params.set('to', toDate);
+  if (limit) params.set('limit', String(limit));
+
+  const queryStr = params.toString();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/prices${queryStr ? `?${queryStr}` : ''}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<PriceBar[]>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    throw new ApiRequestError(
+      'Unable to load historical price data. Please check your network or server connection.'
+    );
+  }
+}
+
+export async function getInstrumentShareCounts(
+  instrumentId: number,
+  signal?: AbortSignal
+): Promise<ShareCountHistory[]> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/share-counts`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<ShareCountHistory[]>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    throw new ApiRequestError(
+      'Unable to load share count history. Please check your network or server connection.'
+    );
+  }
+}
+

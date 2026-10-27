@@ -3,7 +3,8 @@
 
 param (
     [switch]$Force,
-    [switch]$Verbose
+    [switch]$Verbose,
+    [switch]$CatchUp
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +48,7 @@ try {
     $ArgsList = @("$UpdateScript")
     if ($Force) { $ArgsList += "--force" }
     if ($Verbose) { $ArgsList += "--verbose" }
+    if ($CatchUp) { $ArgsList += "--catch-up" }
 
     $Process = Start-Process -FilePath $PythonExe -ArgumentList $ArgsList -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru -Wait
     $ExitCode = $Process.ExitCode
