@@ -5,6 +5,7 @@ from app.models.daily_market_snapshot import DailyMarketSnapshot
 from app.models.ingestion_run import IngestionRun
 from app.models.instrument import Instrument
 from app.models.instrument_share_count import InstrumentShareCount
+from app.models.corporate_action import CorporateAction
 
 __all__ = [
     "Company",
@@ -14,4 +15,5 @@ __all__ = [
     "IngestionRun",
     "DailyMarketSnapshot",
     "InstrumentShareCount",
+    "CorporateAction",
 ]

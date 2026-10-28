@@ -1,4 +1,5 @@
 import type {
+  CorporateAction,
   InstrumentDetailResponse,
   InstrumentSearchResult,
   PriceBar,
@@ -174,11 +175,23 @@ export async function getInstrumentPrices(
   instrumentId: number,
   fromDate?: string,
   toDate?: string,
-  limit: number = 500,
-  signal?: AbortSignal
+  limit: number = 1000,
+  offset: number = 0,
+  arg6?: AbortSignal | boolean,
+  arg7?: AbortSignal
 ): Promise<PriceBar[]> {
   if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
     throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  let autoBackfill = true;
+  let abortSignal: AbortSignal | undefined = undefined;
+
+  if (typeof arg6 === 'boolean') {
+    autoBackfill = arg6;
+    abortSignal = arg7;
+  } else if (arg6 && typeof (arg6 as AbortSignal).aborted === 'boolean') {
+    abortSignal = arg6 as AbortSignal;
   }
 
   const baseUrl = getApiBaseUrl();
@@ -186,6 +199,8 @@ export async function getInstrumentPrices(
   if (fromDate) params.set('from', fromDate);
   if (toDate) params.set('to', toDate);
   if (limit) params.set('limit', String(limit));
+  if (offset !== undefined && offset !== null) params.set('offset', String(offset));
+  if (autoBackfill) params.set('auto_backfill', 'true');
 
   const queryStr = params.toString();
   const url = `${baseUrl}/api/v1/instruments/${instrumentId}/prices${queryStr ? `?${queryStr}` : ''}`;
@@ -194,7 +209,7 @@ export async function getInstrumentPrices(
     const response = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
-      signal,
+      signal: abortSignal,
     });
     return await handleResponse<PriceBar[]>(response);
   } catch (error: unknown) {
@@ -208,6 +223,69 @@ export async function getInstrumentPrices(
       'Unable to load historical price data. Please check your network or server connection.'
     );
   }
+}
+
+/**
+ * Fetches the complete price history for an instrument over the requested range,
+ * paginating automatically through subsequent 1,000-row pages until exhausted.
+ * Deduplicates by trading date and returns ascending chronological bars.
+ */
+export async function fetchAllInstrumentPrices(
+  instrumentId: number,
+  fromDate?: string,
+  toDate?: string,
+  pageSize: number = 1000,
+  arg5?: AbortSignal | boolean,
+  arg6?: AbortSignal
+): Promise<PriceBar[]> {
+  let autoBackfill = true;
+  let abortSignal: AbortSignal | undefined = undefined;
+
+  if (typeof arg5 === 'boolean') {
+    autoBackfill = arg5;
+    abortSignal = arg6;
+  } else if (arg5 && typeof (arg5 as AbortSignal).aborted === 'boolean') {
+    abortSignal = arg5 as AbortSignal;
+  }
+
+  const barsMap = new Map<string, PriceBar>();
+  let currentOffset = 0;
+  const maxPages = 50; // Safety cap: 50 pages * 1,000 = 50,000 trading sessions
+
+  for (let page = 0; page < maxPages; page++) {
+    if (abortSignal?.aborted) {
+      throw new DOMException('Price history fetch was cancelled.', 'AbortError');
+    }
+
+    const pageBars = await getInstrumentPrices(
+      instrumentId,
+      fromDate,
+      toDate,
+      pageSize,
+      currentOffset,
+      autoBackfill && page === 0,
+      abortSignal
+    );
+
+    if (!pageBars || pageBars.length === 0) {
+      break;
+    }
+
+    for (const bar of pageBars) {
+      barsMap.set(bar.trading_date, bar);
+    }
+
+    if (pageBars.length < pageSize) {
+      break;
+    }
+
+    currentOffset += pageSize;
+  }
+
+  // Sort ascending chronologically
+  return Array.from(barsMap.values()).sort((a, b) =>
+    a.trading_date.localeCompare(b.trading_date)
+  );
 }
 
 export async function getInstrumentShareCounts(
@@ -237,6 +315,37 @@ export async function getInstrumentShareCounts(
     }
     throw new ApiRequestError(
       'Unable to load share count history. Please check your network or server connection.'
+    );
+  }
+}
+
+export async function getInstrumentCorporateActions(
+  instrumentId: number,
+  signal?: AbortSignal
+): Promise<CorporateAction[]> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/corporate-actions`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<CorporateAction[]>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    throw new ApiRequestError(
+      'Unable to load corporate actions. Please check your network or server connection.'
     );
   }
 }

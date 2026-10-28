@@ -33,6 +33,8 @@ class BackfillAudit:
     symbols_requested: int = 0
     symbols_completed: int = 0
     symbols_failed: int = 0
+    symbols_empty: int = 0
+    symbols_quarantined: int = 0
     bars_read: int = 0
     bars_inserted: int = 0
     bars_updated: int = 0
@@ -43,6 +45,9 @@ class BackfillAudit:
 
 class HistoricalBackfillService:
     """Orchestrates controlled, rate-limited, resumable historical OHLCV backfill."""
+
+    DEFAULT_HISTORICAL_START_DATE: date = date(2010, 1, 4)
+    DEFAULT_POLICY: str = "primary_equity_series"
 
     def __init__(
         self,
@@ -125,14 +130,33 @@ class HistoricalBackfillService:
         Returns (read, inserted, updated, skipped, failed, errors).
         """
         clean_symbol = symbol.strip().upper()
-        inst = session.scalar(
+        matching_instruments = session.scalars(
             select(Instrument).where(
                 Instrument.symbol == clean_symbol,
                 Instrument.exchange == "NSE",
             )
-        )
-        if inst is None:
+        ).all()
+        if not matching_instruments:
             return 0, 0, 0, 0, 1, [f"Symbol {clean_symbol} not found in instrument master."]
+
+        if len(matching_instruments) == 1:
+            inst = matching_instruments[0]
+        else:
+            # Policy: if multiple series share the symbol, map to the primary equity series ('EQ')
+            eq_matches = [i for i in matching_instruments if i.series == "EQ"]
+            if len(eq_matches) == 1:
+                inst = eq_matches[0]
+                logger.info(
+                    "Symbol %s has multiple instruments (%s); mapped to primary series 'EQ' (ID %d)",
+                    clean_symbol,
+                    [i.series for i in matching_instruments],
+                    inst.id,
+                )
+            else:
+                # Ambiguous series without explicit primary equity mapping -> quarantine
+                err = f"Symbol {clean_symbol} has ambiguous instruments with series {[i.series for i in matching_instruments]}; quarantined."
+                logger.warning(err)
+                return 0, 0, 0, 0, 1, [err]
 
         inst_id = int(inst.id)
         try:
@@ -257,20 +281,38 @@ class HistoricalBackfillService:
 
         audit = BackfillAudit(symbols_requested=len(symbols))
         checkpoint = self.load_checkpoint() if resume else {}
+
+        provider_name = getattr(self.provider, "provider_name", "TejHQ")
+        cp_exchange = checkpoint.get("exchange", "NSE")
+        cp_provider = checkpoint.get("provider", "TejHQ")
+        cp_policy = checkpoint.get("instrument_selection_policy", self.DEFAULT_POLICY)
         cp_from = checkpoint.get("from_date")
         cp_to = checkpoint.get("to_date")
 
-        # Checkpoint is valid only if it matches the requested date range
-        if (
+        # Checkpoint is valid only if exchange, provider, policy, from_date, and to_date match
+        is_valid_checkpoint = (
             resume
+            and cp_exchange == "NSE"
+            and cp_provider == provider_name
+            and cp_policy == self.DEFAULT_POLICY
             and cp_from == from_date.isoformat()
             and cp_to == to_date.isoformat()
-        ):
+        )
+
+        if is_valid_checkpoint:
             completed_set = set(checkpoint.get("completed_symbols", []))
             empty_set = set(checkpoint.get("empty_history_symbols", []))
+            quarantined_set = set(checkpoint.get("quarantined_symbols", []))
         else:
+            if resume and checkpoint:
+                logger.info(
+                    "Checkpoint mismatch (saved: %s to %s [%s/%s/%s] vs requested: %s to %s [%s/%s/%s]). Starting fresh without reusing previous completed symbols.",
+                    cp_from, cp_to, cp_exchange, cp_provider, cp_policy,
+                    from_date, to_date, "NSE", provider_name, self.DEFAULT_POLICY,
+                )
             completed_set = set()
             empty_set = set()
+            quarantined_set = set()
 
         with self.session_factory() as session:
             source = self.get_or_create_source(session)
@@ -278,7 +320,7 @@ class HistoricalBackfillService:
 
             for sym in symbols:
                 clean_sym = sym.strip().upper()
-                if resume and clean_sym in completed_set:
+                if resume and is_valid_checkpoint and clean_sym in completed_set:
                     logger.info("Skipping already backfilled symbol: %s (checkpoint)", clean_sym)
                     continue
 
@@ -296,24 +338,35 @@ class HistoricalBackfillService:
                 if errs:
                     audit.failures.extend(errs)
 
-                if fld > 0 and read_count == 0:
+                is_quarantined = any("quarantined" in str(e).lower() for e in errs)
+
+                if is_quarantined:
+                    audit.symbols_quarantined += 1
+                    quarantined_set.add(clean_sym)
+                elif fld > 0 and read_count == 0:
                     audit.symbols_failed += 1
                 elif read_count == 0:
                     # Distinguish empty history response from verified populated bars
+                    audit.symbols_empty += 1
                     empty_set.add(clean_sym)
                     logger.warning("Symbol %s returned 0 bars between %s and %s", clean_sym, from_date, to_date)
                     audit.failures.append(f"{clean_sym}: 0 historical bars returned")
                 else:
                     audit.symbols_completed += 1
                     completed_set.add(clean_sym)
-                    if not dry_run:
-                        self.save_checkpoint({
-                            "from_date": from_date.isoformat(),
-                            "to_date": to_date.isoformat(),
-                            "completed_symbols": list(completed_set),
-                            "empty_history_symbols": list(empty_set),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                        })
+
+                if not dry_run:
+                    self.save_checkpoint({
+                        "exchange": "NSE",
+                        "provider": provider_name,
+                        "instrument_selection_policy": self.DEFAULT_POLICY,
+                        "from_date": from_date.isoformat(),
+                        "to_date": to_date.isoformat(),
+                        "completed_symbols": sorted(list(completed_set)),
+                        "empty_history_symbols": sorted(list(empty_set)),
+                        "quarantined_symbols": sorted(list(quarantined_set)),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
 
                 # Rate limiting delay
                 if delay_seconds > 0:

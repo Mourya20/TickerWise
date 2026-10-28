@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # Setup paths so app modules can be imported
@@ -176,22 +176,27 @@ def main() -> int:
         symbols_to_backfill = [s.strip().upper() for s in args.backfill_symbols.split(",") if s.strip()]
 
     if symbols_to_backfill:
-        if not args.from_date or not args.to_date:
-            logger.error("--from-date and --to-date are required when using --backfill-symbol / --backfill-symbols")
-            return 1
-
         backfill_svc = HistoricalBackfillService()
+        from_date = args.from_date or HistoricalBackfillService.DEFAULT_HISTORICAL_START_DATE
+        to_date = args.to_date
+        if not to_date:
+            try:
+                provider_status = TejHQProvider().get_status()
+                to_date = provider_status.trading_date or (date.today() - timedelta(days=1))
+            except Exception:
+                to_date = date.today() - timedelta(days=1)
+
         try:
             logger.info(
                 "Backfilling %d symbol(s) from %s to %s...",
                 len(symbols_to_backfill),
-                args.from_date,
-                args.to_date,
+                from_date,
+                to_date,
             )
             audit = backfill_svc.backfill_instruments(
                 symbols=symbols_to_backfill,
-                from_date=args.from_date,
-                to_date=args.to_date,
+                from_date=from_date,
+                to_date=to_date,
                 resume=not args.no_resume,
                 dry_run=args.dry_run,
             )
@@ -231,6 +236,7 @@ def main() -> int:
     print(f"Records Skipped:   {result.records_skipped}")
     print(f"Records Failed:    {result.records_failed}")
     print(f"Records Unmatched: {result.records_unmatched}")
+    print(f"Discovered IPOs:   {result.instruments_discovered}")
     if result.review_path:
         print(f"Review CSV:        {result.review_path}")
     print(f"Message:           {result.message}")

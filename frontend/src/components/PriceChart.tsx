@@ -21,15 +21,23 @@ import {
 interface PriceChartProps {
   instrumentId: number;
   symbol: string;
+  latestDate?: string;
 }
 
 type RangeOption = '1M' | '3M' | '6M' | '1Y' | 'ALL';
 
-function calculateFromDate(range: RangeOption): string | undefined {
+function calculateFromDate(range: RangeOption, anchorDateStr?: string): string | undefined {
   if (range === 'ALL') return undefined;
 
-  const now = new Date();
-  const d = new Date(now.getTime());
+  let baseDate = new Date();
+  if (anchorDateStr) {
+    const parsed = new Date(anchorDateStr);
+    if (!isNaN(parsed.getTime())) {
+      baseDate = parsed;
+    }
+  }
+
+  const d = new Date(baseDate.getTime());
 
   if (range === '1M') d.setDate(d.getDate() - 30);
   else if (range === '3M') d.setDate(d.getDate() - 90);
@@ -42,7 +50,7 @@ function calculateFromDate(range: RangeOption): string | undefined {
   return `${year}-${month}-${day}`;
 }
 
-export const PriceChart: React.FC<PriceChartProps> = ({ instrumentId, symbol }) => {
+export const PriceChart: React.FC<PriceChartProps> = ({ instrumentId, symbol, latestDate }) => {
   const { theme } = useTheme();
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
@@ -55,29 +63,68 @@ export const PriceChart: React.FC<PriceChartProps> = ({ instrumentId, symbol }) 
   const [error, setError] = useState<string | null>(null);
   const [hoveredBar, setHoveredBar] = useState<PriceBar | null>(null);
 
-  // Fetch prices on instrumentId or range change
-  const fetchPrices = async () => {
+  // Fetch complete price history for the selected range with automatic multi-page pagination and cancellation
+  const fetchPrices = async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const fromDate = calculateFromDate(range);
-      const data = await getInstrumentPrices(instrumentId, fromDate, undefined, 1000);
-      setBars(data);
-      if (data.length > 0) {
-        setHoveredBar(data[data.length - 1]);
+      const fromDate = calculateFromDate(range, latestDate);
+      const barsMap = new Map<string, PriceBar>();
+      let offset = 0;
+      const pageSize = 1000;
+      const maxPages = 50;
+
+      for (let page = 0; page < maxPages; page++) {
+        if (signal?.aborted) return;
+        const pageBars = await getInstrumentPrices(
+          instrumentId,
+          fromDate,
+          undefined,
+          pageSize,
+          offset,
+          page === 0, // trigger auto_backfill on first page if missing
+          signal
+        );
+        if (signal?.aborted) return;
+        if (!pageBars || pageBars.length === 0) break;
+
+        for (const b of pageBars) {
+          barsMap.set(b.trading_date, b);
+        }
+
+        if (pageBars.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      const sortedData = Array.from(barsMap.values()).sort((a, b) =>
+        a.trading_date.localeCompare(b.trading_date)
+      );
+
+      setBars(sortedData);
+      if (sortedData.length > 0) {
+        setHoveredBar(sortedData[sortedData.length - 1]);
       } else {
         setHoveredBar(null);
       }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return; // Normal cancellation
+      }
       const message = err instanceof Error ? err.message : 'Failed to load historical prices';
       setError(message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchPrices();
+    const controller = new AbortController();
+    fetchPrices(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [instrumentId, range]);
 
   // Initialize and update Lightweight Charts instance
@@ -228,9 +275,9 @@ export const PriceChart: React.FC<PriceChartProps> = ({ instrumentId, symbol }) 
       <div className="chart-header-row">
         <div className="chart-title-group">
           <h3 className="chart-title">Daily OHLCV Chart</h3>
-          {latestBar && (
-            <span className="chart-latest-date-pill">
-              Latest session: {formatDate(latestBar.trading_date)}
+          {bars.length > 0 && (
+            <span className="chart-latest-date-pill" title={`Available history: ${bars[0].trading_date} to ${bars[bars.length - 1].trading_date}`}>
+              {bars.length} sessions ({formatDate(bars[0].trading_date)} – {formatDate(bars[bars.length - 1].trading_date)})
             </span>
           )}
         </div>

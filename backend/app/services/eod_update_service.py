@@ -31,6 +31,10 @@ from app.providers.base import (
 )
 from app.providers.tejhq import TejHQProvider
 from app.providers.zero_x_ramm import ZeroXRammProvider
+from app.services.instrument_discovery_service import (
+    DiscoveryResult,
+    InstrumentDiscoveryService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,7 @@ class EODUpdateResult:
     records_unmatched: int
     review_path: Path | None
     message: str
+    instruments_discovered: int = 0
 
 
 @dataclass(frozen=True)
@@ -102,10 +107,12 @@ class EODUpdateService:
         self,
         tejhq_provider: TejHQProvider | None = None,
         zero_x_ramm_provider: ZeroXRammProvider | None = None,
+        discovery_service: InstrumentDiscoveryService | None = None,
         session_factory=SessionLocal,
     ) -> None:
         self.tejhq = tejhq_provider or TejHQProvider()
         self.zero_x_ramm = zero_x_ramm_provider or ZeroXRammProvider()
+        self.discovery_service = discovery_service or InstrumentDiscoveryService()
         self.session_factory = session_factory
 
     def get_or_create_source(
@@ -510,6 +517,21 @@ class EODUpdateService:
 
         try:
             with self.session_factory() as session:
+                # 0. Automatic discovery of newly listed NSE equity instruments
+                discovery_res = self.discovery_service.discover_and_onboard(
+                    session=session,
+                    snapshot_rows=normalized_rows,
+                    snapshot_date=target_date,
+                    exchange="NSE",
+                )
+                discovered_count = discovery_res.summary.discovered
+                if discovered_count > 0:
+                    logger.info(
+                        "Onboarded %d new NSE equity instruments for snapshot %s",
+                        discovered_count,
+                        target_date,
+                    )
+
                 # Load instrument lookups
                 instruments = session.scalars(select(Instrument)).all()
                 exact_instruments: dict[tuple[str, str, str], Instrument] = {}
@@ -715,6 +737,8 @@ class EODUpdateService:
                     f"EOD update for {target_date} finished: {inserted} inserted, "
                     f"{updated} updated, {skipped} unchanged, {failed} failed, {unmatched} unmatched."
                 )
+                if discovered_count > 0:
+                    msg += f" Discovered and onboarded {discovered_count} new equity instruments."
             if dry_run:
                 msg = "[DRY RUN] " + msg
 
@@ -730,6 +754,7 @@ class EODUpdateService:
                 records_unmatched=unmatched,
                 review_path=review_path,
                 message=msg,
+                instruments_discovered=discovered_count,
             )
 
         except Exception as exc:

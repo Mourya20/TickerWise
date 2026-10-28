@@ -3,6 +3,8 @@ import {
   checkHealth,
   searchInstruments,
   getInstrumentDetail,
+  getInstrumentPrices,
+  fetchAllInstrumentPrices,
   ApiRequestError,
   getApiBaseUrl,
 } from '../api';
@@ -130,5 +132,62 @@ describe('API Service Module', () => {
 
     const res = await checkHealth();
     expect(res).toEqual({ status: 'ok' });
+  });
+
+  it('paginates price history across multiple 1,000-bar pages and deduplicates', async () => {
+    // Generate page 0 (1,000 bars from 2022-01-01)
+    const page0 = Array.from({ length: 1000 }, (_, i) => ({
+      trading_date: `2024-01-${String((i % 28) + 1).padStart(2, '0')}-${i}`,
+      open: '100',
+      high: '110',
+      low: '90',
+      close: '105',
+    }));
+    // Page 1 (250 bars)
+    const page1 = Array.from({ length: 250 }, (_, i) => ({
+      trading_date: `2020-01-${String((i % 28) + 1).padStart(2, '0')}-${i}`,
+      open: '80',
+      high: '85',
+      low: '75',
+      close: '82',
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(page0),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(page1),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const results = await fetchAllInstrumentPrices(1879, undefined, undefined, 1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Verify offset progression
+    const call0 = fetchMock.mock.calls[0][0];
+    const call1 = fetchMock.mock.calls[1][0];
+    expect(call0).toContain('offset=0');
+    expect(call1).toContain('offset=1000');
+
+    // Total unique bars
+    expect(results.length).toBe(1250);
+
+    // Verify chronological ordering
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].trading_date >= results[i - 1].trading_date).toBe(true);
+    }
+  });
+
+  it('respects AbortController cancellation during price pagination', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fetchAllInstrumentPrices(1879, undefined, undefined, 1000, controller.signal)
+    ).rejects.toThrow();
   });
 });

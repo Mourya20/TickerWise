@@ -135,23 +135,11 @@ class MarketCapService:
 
         price_date = snapshot.snapshot_date
 
-        # 2. Select applicable share count
-        # Strictly enforce point-in-time correctness: only filings on or before price_date
-        share_stmt = (
-            select(InstrumentShareCount, DataSource)
-            .join(DataSource, DataSource.id == InstrumentShareCount.source_id)
-            .where(
-                InstrumentShareCount.instrument_id == instrument_id,
-                InstrumentShareCount.share_class == "EQUITY",
-                InstrumentShareCount.is_active == True,
-                InstrumentShareCount.reporting_date <= price_date,
-            )
-            .order_by(InstrumentShareCount.reporting_date.desc(), InstrumentShareCount.id.desc())
-            .limit(1)
-        )
-        row = db.execute(share_stmt).first()
+        # 2. Select applicable share count with point-in-time corporate action resolution
+        ca_service = CorporateActionService()
+        share_res = ca_service.resolve_applicable_share_count(db, instrument_id, price_date)
 
-        if row is None:
+        if share_res.share_count is None:
             return MarketCapResult(
                 market_cap_crores=None,
                 currency="INR",
@@ -160,68 +148,24 @@ class MarketCapService:
                 price_date=price_date,
                 price_type=price_type,
                 share_count=None,
-                share_count_date=None,
-                share_count_source=None,
-                share_count_method=None,
+                share_count_date=share_res.base_reporting_date,
+                share_count_source=share_res.data_source,
+                share_count_method=share_res.extraction_method,
                 share_count_status="unavailable",
                 is_stale=True,
                 status="unavailable",
-                explanation=f"No official NSE shareholding pattern disclosure found on or before price date {price_date}.",
+                explanation=share_res.explanation or f"No official NSE shareholding pattern disclosure found on or before price date {price_date}.",
                 calculated_at=now_utc,
             )
 
-        share_rec, data_source = row
-        base_share_count = share_rec.reported_share_count
-        share_count_date = share_rec.reporting_date
-        share_source = data_source.name if data_source else "NSE Disclosure"
-        share_method = share_rec.extraction_method
+        effective_share_count = share_res.share_count
+        share_count_date = share_res.base_reporting_date
+        share_source = share_res.data_source or "NSE Disclosure"
+        share_method = share_res.extraction_method
+        share_status = share_res.status
+        is_stale = share_res.is_stale
 
-        if base_share_count is None or base_share_count <= 0:
-            return MarketCapResult(
-                market_cap_crores=None,
-                currency="INR",
-                unit="₹ Crores",
-                price_used=price,
-                price_date=price_date,
-                price_type=price_type,
-                share_count=base_share_count,
-                share_count_date=share_count_date,
-                share_count_source=share_source,
-                share_count_method=share_method,
-                share_count_status="unavailable",
-                is_stale=True,
-                status="unavailable",
-                explanation="Reported share count is zero or negative.",
-                calculated_at=now_utc,
-            )
-
-        # 3. Check point-in-time corporate actions (splits, bonuses) between reporting_date and price_date
-        effective_share_count = base_share_count
-        explanation_notes: list[str] = []
-        if price_date > share_count_date:
-            ca_service = CorporateActionService()
-            adj = ca_service.get_adjustment_factor(instrument.symbol, share_count_date, price_date)
-            if adj.factor != Decimal("1.0"):
-                effective_share_count = int(Decimal(base_share_count) * adj.factor)
-                explanation_notes.append(
-                    f"Adjusted for corporate actions ({'; '.join(adj.details)})"
-                )
-            if not adj.is_verified:
-                explanation_notes.append(
-                    f"Corporate action verification unconfirmed: {adj.error_message}"
-                )
-
-        # 4. Check freshness
-        days_diff = (price_date - share_count_date).days
-        is_stale = bool(days_diff > STALE_SHARE_COUNT_THRESHOLD_DAYS or days_diff < 0)
-        share_status = "stale" if is_stale else "fresh"
-        if is_stale:
-            explanation_notes.append(
-                f"Share count reporting date ({share_count_date}) is {days_diff} days "
-                f"prior to price snapshot date ({price_date}). Stale indicator flagged."
-            )
-
-        # 5. Deterministic computation: (price * effective_shares) / 10,000,000
+        # 3. Deterministic computation: (price * effective_shares) / 10,000,000
         raw_cap = price * Decimal(effective_share_count)
         mcap_crores = (raw_cap / Decimal("10000000")).quantize(Decimal("0.000001"))
 
@@ -239,6 +183,7 @@ class MarketCapService:
             share_count_status=share_status,
             is_stale=is_stale,
             status="calculated",
-            explanation="; ".join(explanation_notes) if explanation_notes else None,
+            explanation=share_res.explanation,
             calculated_at=now_utc,
         )
+

@@ -102,8 +102,46 @@ class InstrumentDetailResponse(BaseModel):
     instrument_type: str
     isin: str | None
     listing_date: date | None
+    first_seen_date: date | None = None
     paid_up_value: Decimal | None
     market_lot: int | None
     face_value: Decimal | None
     is_active: bool
     snapshot: MarketSnapshotResponse | None
+
+
+class CorporateActionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    instrument_id: int
+    exchange: str
+    symbol: str
+    event_type: str
+    dedup_key: str
+    announcement_date: date | None = None
+    record_date: date | None = None
+    ex_date: date | None = None
+    issue_open_date: date | None = None
+    issue_close_date: date | None = None
+    allotment_date: date | None = None
+    completion_date: date | None = None
+    effective_date: date | None = None
+    ratio_num: int | None = None
+    ratio_den: int | None = None
+    face_value_from: Decimal | None = None
+    face_value_to: Decimal | None = None
+    cash_amount: Decimal | None = None
+    proposed_shares: int | None = None
+    proposed_amount: Decimal | None = None
+    actual_shares: int | None = None
+    actual_amount: Decimal | None = None
+    status: str
+    source_id: int
+    source_name: str | None = None
+    source_reference: str | None = None
+    retrieved_at: datetime
+    raw_subject: str | None = None
+    validation_status: str
+    notes: str | None = None
+
