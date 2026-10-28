@@ -1,12 +1,15 @@
 {
-  "from_date": "2026-10-15",
-  "to_date": "2026-10-26",
+  "exchange": "NSE",
+  "provider": "TejHQ",
+  "instrument_selection_policy": "primary_equity_series",
+  "from_date": "2025-01-01",
+  "to_date": "2025-06-01",
   "completed_symbols": [
-    "INFY",
-    "RELIANCE",
-    "TCS",
-    "HDFCBANK",
-    "WIPRO"
+    "RELIANCE"
   ],
-  "updated_at": "2026-10-27T13:18:37.337424+00:00"
+  "empty_history_symbols": [
+    "TATAMOTORS"
+  ],
+  "quarantined_symbols": [],
+  "updated_at": "2026-10-28T19:13:29.679999+00:00"
 }

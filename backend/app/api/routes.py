@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -9,6 +10,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
     Company,
+    CorporateAction,
     DailyMarketSnapshot,
     DataSource,
     IngestionRun,
@@ -17,6 +19,7 @@ from app.models import (
 )
 from app.providers.tejhq import TejHQProvider
 from app.schemas.instrument import (
+    CorporateActionResponse,
     InstrumentDetailResponse,
     InstrumentSearchResult,
     MarketSnapshotResponse,
@@ -24,7 +27,12 @@ from app.schemas.instrument import (
     ShareCountHistoryResponse,
 )
 from app.schemas.provider import ProviderInfo, ProviderStatusResponse
+from app.services.corporate_action_service import CorporateActionService
+from app.services.historical_backfill_service import HistoricalBackfillService
 from app.services.market_cap_service import MarketCapService
+
+logger = logging.getLogger(__name__)
+_empty_history_symbols: set[str] = set()
 
 router = APIRouter()
 
@@ -376,6 +384,7 @@ def get_instrument(
         instrument_type=instrument.instrument_type,
         isin=instrument.isin,
         listing_date=instrument.listing_date,
+        first_seen_date=instrument.first_seen_date,
         paid_up_value=instrument.paid_up_value,
         market_lot=instrument.market_lot,
         face_value=instrument.face_value,
@@ -394,6 +403,7 @@ def get_instrument_prices(
     to_date: date | None = Query(None, alias="to"),
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
+    auto_backfill: bool = Query(False),
     db: Session = Depends(get_db),
 ) -> list[PriceBarResponse]:
     inst = db.get(Instrument, instrument_id)
@@ -408,6 +418,40 @@ def get_instrument_prices(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid date range: 'from' date cannot be after 'to' date.",
         )
+
+    if auto_backfill and inst.symbol not in _empty_history_symbols:
+        try:
+            snapshot_count = db.scalar(
+                select(func.count(DailyMarketSnapshot.id)).where(
+                    DailyMarketSnapshot.instrument_id == instrument_id
+                )
+            ) or 0
+            earliest_date = db.scalar(
+                select(func.min(DailyMarketSnapshot.snapshot_date)).where(
+                    DailyMarketSnapshot.instrument_id == instrument_id
+                )
+            )
+
+            needs_backfill = False
+            if snapshot_count <= 15:
+                needs_backfill = True
+            elif from_date is not None and earliest_date is not None and from_date < earliest_date:
+                needs_backfill = True
+            elif from_date is None and earliest_date is not None and earliest_date >= date(2026, 10, 14):
+                needs_backfill = True
+
+            if needs_backfill:
+                bf_svc = HistoricalBackfillService()
+                source = bf_svc.get_or_create_source(db)
+                bf_from = min(from_date, date(2020, 1, 1)) if from_date else date(2020, 1, 1)
+                bf_to = to_date or date.today()
+                read_cnt, ins_cnt, upd_cnt, _, _, _ = bf_svc.backfill_single_instrument(
+                    inst.symbol, bf_from, bf_to, db, source.id, dry_run=False
+                )
+                if read_cnt == 0:
+                    _empty_history_symbols.add(inst.symbol)
+        except Exception as exc:
+            logger.warning("On-demand historical backfill failed for %s: %s", inst.symbol, exc)
 
     statement = (
         select(DailyMarketSnapshot, DataSource)
@@ -505,6 +549,87 @@ def get_instrument_share_counts(
             corporate_action_details=rec.corporate_action_details,
         )
         for rec, source in rows
+    ]
+
+
+@router.get(
+    "/api/v1/instruments/{instrument_id}/corporate-actions",
+    response_model=list[CorporateActionResponse],
+)
+def get_instrument_corporate_actions(
+    instrument_id: int,
+    db: Session = Depends(get_db),
+) -> list[CorporateActionResponse]:
+    inst = db.get(Instrument, instrument_id)
+    if inst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Instrument not found.",
+        )
+
+    statement = (
+        select(CorporateAction, DataSource)
+        .outerjoin(DataSource, DataSource.id == CorporateAction.source_id)
+        .where(CorporateAction.instrument_id == instrument_id)
+        .order_by(
+            func.coalesce(
+                CorporateAction.effective_date,
+                CorporateAction.ex_date,
+                CorporateAction.allotment_date,
+                CorporateAction.completion_date,
+                CorporateAction.record_date,
+                CorporateAction.announcement_date,
+            ).desc(),
+            CorporateAction.id.desc(),
+        )
+    )
+
+    try:
+        rows = db.execute(statement).all()
+        if not rows:
+            ca_svc = CorporateActionService()
+            count = ca_svc.fetch_and_persist_for_symbol(db, inst.symbol)
+            if count > 0:
+                rows = db.execute(statement).all()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise database_error() from exc
+
+    return [
+        CorporateActionResponse(
+            id=act.id,
+            instrument_id=act.instrument_id,
+            exchange=act.exchange,
+            symbol=act.symbol,
+            event_type=act.event_type,
+            dedup_key=act.dedup_key,
+            announcement_date=act.announcement_date,
+            record_date=act.record_date,
+            ex_date=act.ex_date,
+            issue_open_date=act.issue_open_date,
+            issue_close_date=act.issue_close_date,
+            allotment_date=act.allotment_date,
+            completion_date=act.completion_date,
+            effective_date=act.effective_date,
+            ratio_num=act.ratio_num,
+            ratio_den=act.ratio_den,
+            face_value_from=act.face_value_from,
+            face_value_to=act.face_value_to,
+            cash_amount=act.cash_amount,
+            proposed_shares=act.proposed_shares,
+            proposed_amount=act.proposed_amount,
+            actual_shares=act.actual_shares,
+            actual_amount=act.actual_amount,
+            status=act.status,
+            source_id=act.source_id,
+            source_name=source.name if source else None,
+            source_reference=act.source_reference,
+            retrieved_at=act.retrieved_at,
+            raw_subject=act.raw_subject,
+            validation_status=act.validation_status,
+            notes=act.notes,
+        )
+        for act, source in rows
     ]
 
 

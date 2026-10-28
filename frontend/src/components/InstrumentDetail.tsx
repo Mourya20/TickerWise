@@ -1,5 +1,13 @@
-import React, { useState } from 'react';
-import type { InstrumentDetailResponse } from '../types/instrument';
+import React, { useEffect, useState } from 'react';
+import type {
+  CorporateAction,
+  InstrumentDetailResponse,
+  ShareCountHistory,
+} from '../types/instrument';
+import {
+  getInstrumentCorporateActions,
+  getInstrumentShareCounts,
+} from '../services/api';
 import {
   formatCurrencyINR,
   formatDate,
@@ -20,6 +28,7 @@ type TabKey =
   | 'snapshot'
   | 'overview'
   | 'prices'
+  | 'actions'
   | 'technical'
   | 'fundamentals'
   | 'peers'
@@ -30,6 +39,7 @@ type TabKey =
 const TABS: { key: TabKey; label: string; isPlanned: boolean }[] = [
   { key: 'snapshot', label: 'Snapshot', isPlanned: false },
   { key: 'prices', label: 'Prices', isPlanned: false },
+  { key: 'actions', label: 'Corporate Actions', isPlanned: false },
   { key: 'technical', label: 'Technical', isPlanned: true },
   { key: 'fundamentals', label: 'Fundamentals', isPlanned: true },
   { key: 'peers', label: 'Peers', isPlanned: true },
@@ -45,6 +55,61 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
 }) => {
   const normalizedInitial = (initialTab === 'overview' ? 'snapshot' : initialTab) as TabKey;
   const [activeTab, setActiveTab] = useState<TabKey>(normalizedInitial || 'snapshot');
+
+  const [corporateActions, setCorporateActions] = useState<CorporateAction[] | null>(null);
+  const [actionsLoading, setActionsLoading] = useState<boolean>(false);
+  const [actionsError, setActionsError] = useState<string | null>(null);
+
+  const [shareCounts, setShareCounts] = useState<ShareCountHistory[] | null>(null);
+  const [shareCountsLoading, setShareCountsLoading] = useState<boolean>(false);
+  const [shareCountsError, setShareCountsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'actions') return;
+
+    let isMounted = true;
+    const controller = new AbortController();
+
+    async function loadData() {
+      setActionsLoading(true);
+      setActionsError(null);
+      setShareCountsLoading(true);
+      setShareCountsError(null);
+
+      try {
+        const [actionsData, sharesData] = await Promise.allSettled([
+          getInstrumentCorporateActions(instrument.instrument_id, controller.signal),
+          getInstrumentShareCounts(instrument.instrument_id, controller.signal),
+        ]);
+
+        if (!isMounted) return;
+
+        if (actionsData.status === 'fulfilled') {
+          setCorporateActions(actionsData.value);
+        } else {
+          setActionsError('Failed to load corporate actions.');
+        }
+
+        if (sharesData.status === 'fulfilled') {
+          setShareCounts(sharesData.value);
+        } else {
+          setShareCountsError('Failed to load share count history.');
+        }
+      } finally {
+        if (isMounted) {
+          setActionsLoading(false);
+          setShareCountsLoading(false);
+        }
+      }
+    }
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [activeTab, instrument.instrument_id]);
 
   const { snapshot } = instrument;
   const pctChange = snapshot ? formatPercentageChange(snapshot.percentage_change_pct) : null;
@@ -93,12 +158,17 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
               <span>ISIN {instrument.isin}</span>
             </>
           )}
-          {instrument.listing_date && (
+          {instrument.listing_date ? (
             <>
               <span className="meta-dot">·</span>
               <span>LISTED {formatDate(instrument.listing_date)}</span>
             </>
-          )}
+          ) : instrument.first_seen_date ? (
+            <>
+              <span className="meta-dot">·</span>
+              <span>FIRST SEEN {formatDate(instrument.first_seen_date)}</span>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -243,7 +313,11 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
 
               {/* Interactive Price & Volume Chart */}
               <div className="snapshot-chart-container" style={{ marginTop: '24px' }}>
-                <PriceChart instrumentId={instrument.instrument_id} symbol={instrument.symbol} />
+                <PriceChart
+                  instrumentId={instrument.instrument_id}
+                  symbol={instrument.symbol}
+                  latestDate={instrument.snapshot?.snapshot_date}
+                />
               </div>
             </div>
           ) : (
@@ -323,13 +397,183 @@ export const InstrumentDetail: React.FC<InstrumentDetailProps> = ({
             <div className="prices-tab-view" style={{ marginTop: '16px' }}>
               <div style={{ marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px 0' }}>
-                  {instrument.symbol} · Historical Daily Prices &amp; Volume
+                  {instrument.symbol} · Historical Daily Prices & Volume
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: 0 }}>
                   Interactive candlestick OHLCV and trading volume history.
                 </p>
               </div>
-              <PriceChart instrumentId={instrument.instrument_id} symbol={instrument.symbol} />
+              <PriceChart
+                instrumentId={instrument.instrument_id}
+                symbol={instrument.symbol}
+                latestDate={instrument.snapshot?.snapshot_date}
+              />
+            </div>
+          )}
+
+          {activeTab === 'actions' && (
+            <div className="corporate-actions-tab-view" style={{ marginTop: '16px' }}>
+              <div style={{ marginBottom: '20px' }}>
+                <h2 data-testid="corporate-actions-heading" style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+                  {instrument.symbol} · Corporate Actions & Share Capital History
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
+                  Verified exchange corporate actions and dated share capital filings used for defensible market capitalization calculation.
+                </p>
+              </div>
+
+              {/* Corporate Actions Table */}
+              <div style={{ marginBottom: '32px' }}>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Exchange Corporate Actions</span>
+                  {corporateActions && (
+                    <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+                      {corporateActions.length} recorded
+                    </span>
+                  )}
+                </h3>
+
+                {actionsLoading ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading corporate actions...</div>
+                ) : actionsError ? (
+                  <div style={{ padding: '16px', color: 'var(--color-loss)', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px' }}>{actionsError}</div>
+                ) : !corporateActions || corporateActions.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-surface)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    No corporate actions recorded for this instrument.
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="results-table" aria-label="Corporate Actions Table">
+                      <thead>
+                        <tr>
+                          <th>Event Date</th>
+                          <th>Event Type</th>
+                          <th>Details & Terms</th>
+                          <th>Status</th>
+                          <th>Source Reference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {corporateActions.map((act) => {
+                          const eventDate = act.effective_date || act.ex_date || act.allotment_date || act.record_date || act.announcement_date;
+                          let detailsStr = act.raw_subject || '—';
+                          if (act.event_type === 'bonus' && act.ratio_num && act.ratio_den) {
+                            detailsStr = `Bonus Issue ${act.ratio_num}:${act.ratio_den}`;
+                          } else if (act.event_type === 'split' && act.face_value_from && act.face_value_to) {
+                            detailsStr = `Stock Split FV ₹${act.face_value_from} to ₹${act.face_value_to}`;
+                          } else if (act.event_type === 'split' && act.ratio_num && act.ratio_den) {
+                            detailsStr = `Stock Split ${act.ratio_num}:${act.ratio_den}`;
+                          } else if (act.cash_amount) {
+                            detailsStr = `Dividend ₹${act.cash_amount} per share`;
+                          } else if (act.actual_shares) {
+                            detailsStr = `${act.event_type.toUpperCase()} Allotment: ${act.actual_shares.toLocaleString('en-IN')} shares`;
+                          }
+                          return (
+                            <tr key={act.id}>
+                              <td style={{ whiteSpace: 'nowrap' }}>{eventDate ? formatDate(eventDate) : '—'}</td>
+                              <td>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 600,
+                                  textTransform: 'uppercase',
+                                  background: act.event_type === 'bonus' || act.event_type === 'split' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                                  color: act.event_type === 'bonus' || act.event_type === 'split' ? '#60a5fa' : 'var(--text-primary)',
+                                }}>
+                                  {act.event_type}
+                                </span>
+                              </td>
+                              <td>{detailsStr}</td>
+                              <td>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.72rem',
+                                  textTransform: 'capitalize',
+                                  background: act.status === 'completed' || act.status === 'allotted' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                                  color: act.status === 'completed' || act.status === 'allotted' ? '#4ade80' : '#facc15',
+                                }}>
+                                  {act.status}
+                                </span>
+                              </td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                                {act.source_name || act.source_reference || 'TejHQ'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Share Capital History Table */}
+              <div>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Official Shareholding Pattern Filings</span>
+                  {shareCounts && (
+                    <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
+                      {shareCounts.length} filings
+                    </span>
+                  )}
+                </h3>
+
+                {shareCountsLoading ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading share capital history...</div>
+                ) : shareCountsError ? (
+                  <div style={{ padding: '16px', color: 'var(--color-loss)', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '6px' }}>{shareCountsError}</div>
+                ) : !shareCounts || shareCounts.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-surface)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    No shareholding pattern filings found.
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="results-table" aria-label="Shareholding Pattern Table">
+                      <thead>
+                        <tr>
+                          <th>Quarter Ended</th>
+                          <th>Reported Shares</th>
+                          <th>Filing Method</th>
+                          <th>Validation</th>
+                          <th>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shareCounts.map((sc) => (
+                          <tr key={sc.id}>
+                            <td style={{ whiteSpace: 'nowrap' }}>{formatDate(sc.reporting_date)}</td>
+                            <td style={{ fontWeight: 600 }}>{sc.reported_share_count.toLocaleString('en-IN')}</td>
+                            <td>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                {sc.extraction_method === 'directly_reported' ? 'Direct XBRL' : 'Derived'}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.72rem',
+                                background: sc.validation_status === 'valid' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                                color: sc.validation_status === 'valid' ? '#4ade80' : '#facc15',
+                              }}>
+                                {sc.validation_status}
+                              </span>
+                            </td>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                              {sc.corporate_action_details || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

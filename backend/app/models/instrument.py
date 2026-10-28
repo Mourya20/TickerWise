@@ -75,6 +75,11 @@ class Instrument(Base):
         nullable=True,
     )
 
+    first_seen_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
     paid_up_value: Mapped[Decimal | None] = mapped_column(
         Numeric(12, 4),
         nullable=True,

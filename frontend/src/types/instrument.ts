@@ -76,6 +76,40 @@ export interface ShareCountHistory {
   corporate_action_details?: string | null;
 }
 
+export interface CorporateAction {
+  id: number;
+  instrument_id: number;
+  exchange: string;
+  symbol: string;
+  event_type: string;
+  dedup_key: string;
+  announcement_date?: string | null;
+  record_date?: string | null;
+  ex_date?: string | null;
+  issue_open_date?: string | null;
+  issue_close_date?: string | null;
+  allotment_date?: string | null;
+  completion_date?: string | null;
+  effective_date?: string | null;
+  ratio_num?: number | null;
+  ratio_den?: number | null;
+  face_value_from?: string | number | null;
+  face_value_to?: string | number | null;
+  cash_amount?: string | number | null;
+  proposed_shares?: number | null;
+  proposed_amount?: string | number | null;
+  actual_shares?: number | null;
+  actual_amount?: string | number | null;
+  status: string;
+  source_id: number;
+  source_name?: string | null;
+  source_reference?: string | null;
+  retrieved_at: string;
+  raw_subject?: string | null;
+  validation_status: string;
+  notes?: string | null;
+}
+
 export interface InstrumentDetailResponse {
   instrument_id: number;
   company_id: number;
@@ -86,6 +120,7 @@ export interface InstrumentDetailResponse {
   instrument_type: string;
   isin: string | null;
   listing_date: string | null;
+  first_seen_date?: string | null;
   paid_up_value: string | null;
   market_lot: number | null;
   face_value: string | null;

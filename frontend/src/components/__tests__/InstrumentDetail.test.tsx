@@ -86,6 +86,8 @@ describe('InstrumentDetail Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(api, 'getInstrumentPrices').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentShareCounts').mockResolvedValue([]);
   });
 
   it('renders hero price, delta, and dated market notice', () => {
@@ -170,4 +172,74 @@ describe('InstrumentDetail Component', () => {
     fireEvent.click(backButton);
     expect(onBackMock).toHaveBeenCalledTimes(1);
   });
+
+  it('switches to Corporate Actions tab and displays actions and share capital tables', async () => {
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([
+      {
+        id: 1,
+        instrument_id: 2304,
+        exchange: 'NSE',
+        symbol: 'TCS',
+        event_type: 'bonus',
+        dedup_key: 'NSE:TCS:bonus:2026-10-01:R1_1',
+        ex_date: '2026-10-01',
+        ratio_num: 1,
+        ratio_den: 1,
+        status: 'completed',
+        source_id: 1,
+        source_name: 'TejHQ Corporate Actions',
+        retrieved_at: '2026-10-28T00:00:00Z',
+        validation_status: 'valid',
+      },
+      {
+        id: 2,
+        instrument_id: 2304,
+        exchange: 'NSE',
+        symbol: 'TCS',
+        event_type: 'dividend',
+        dedup_key: 'NSE:TCS:dividend:2026-10-15:C12',
+        ex_date: '2026-10-15',
+        cash_amount: '12.00',
+        status: 'completed',
+        source_id: 1,
+        source_name: 'TejHQ Corporate Actions',
+        retrieved_at: '2026-10-28T00:00:00Z',
+        validation_status: 'valid',
+      },
+    ]);
+
+    vi.spyOn(api, 'getInstrumentShareCounts').mockResolvedValue([
+      {
+        id: 1,
+        instrument_id: 2304,
+        symbol: 'TCS',
+        series: 'EQ',
+        share_class: 'EQUITY',
+        reported_share_count: 3618087520,
+        reporting_date: '2026-09-30',
+        retrieved_at: '2026-10-28T00:00:00Z',
+        extraction_method: 'directly_reported',
+        validation_status: 'valid',
+        corporate_action_adjusted: false,
+      },
+    ]);
+
+    render(
+      <ThemeProvider>
+        <InstrumentDetail instrument={mockInstrumentWithSnapshot} onBack={vi.fn()} />
+      </ThemeProvider>
+    );
+
+    const actionsTab = screen.getByRole('tab', { name: /corporate actions/i });
+    fireEvent.click(actionsTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('corporate-actions-heading')).toBeInTheDocument();
+      expect(screen.getByText(/bonus issue 1:1/i)).toBeInTheDocument();
+      expect(screen.getByText(/dividend ₹12.00 per share/i)).toBeInTheDocument();
+      expect(screen.getByText('3,61,80,87,520')).toBeInTheDocument();
+      expect(screen.getByText('Direct XBRL')).toBeInTheDocument();
+    });
+  });
 });
+
