@@ -13,8 +13,14 @@ LOGS_DIR = PROJECT_ROOT / "logs"
 sys.path.insert(0, str(BACKEND_DIR))
 
 from app.providers.tejhq import TejHQProvider  # noqa: E402
-from app.services.eod_update_service import EODUpdateService  # noqa: E402
-from app.services.historical_backfill_service import HistoricalBackfillService  # noqa: E402
+from app.ingestion.eod_service import EODUpdateService  # noqa: E402
+from app.market_data.backfill import HistoricalBackfillService  # noqa: E402
+from app.workers import (  # noqa: E402
+    check_provider_status,
+    run_backfill_worker,
+    run_catchup_worker,
+    run_eod_worker,
+)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -127,17 +133,16 @@ def main() -> int:
 
     # Check provider status mode
     if args.check_status:
-        provider = TejHQProvider()
         try:
-            status = provider.get_status()
+            status = check_provider_status()
             print("\n--- Provider Status ---")
-            print(f"Provider:             {status.provider_name}")
-            print(f"Latest Trading Date:  {status.trading_date}")
-            print(f"Pipeline Stage:       {status.stage}")
-            print(f"Prices Published At:  {status.prices_published_at}")
-            print(f"Derived Published At: {status.derived_published_at}")
-            print(f"Is Fresh:             {status.is_fresh}")
-            print(f"Run URL:              {status.run_url}")
+            print(f"Provider:             {status['provider_name']}")
+            print(f"Latest Trading Date:  {status['trading_date']}")
+            print(f"Pipeline Stage:       {status['stage']}")
+            print(f"Prices Published At:  {status['prices_published_at']}")
+            print(f"Derived Published At: {status['derived_published_at']}")
+            print(f"Is Fresh:             {status['is_fresh']}")
+            print(f"Run URL:              {status['run_url']}")
             return 0
         except Exception as exc:
             logger.error("Failed to check provider status: %s", exc)
@@ -145,9 +150,7 @@ def main() -> int:
 
     # Catch-up mode
     if args.catch_up:
-        service = EODUpdateService()
-        logger.info("Executing EOD catch-up sequence...")
-        results = service.run_catchup(dry_run=args.dry_run, min_coverage_threshold=args.min_coverage)
+        results = run_catchup_worker(dry_run=args.dry_run, min_coverage_threshold=args.min_coverage)
         if not results:
             print("\nDatabase is already up to date with the latest published provider trading date.")
             return 0
@@ -176,27 +179,11 @@ def main() -> int:
         symbols_to_backfill = [s.strip().upper() for s in args.backfill_symbols.split(",") if s.strip()]
 
     if symbols_to_backfill:
-        backfill_svc = HistoricalBackfillService()
-        from_date = args.from_date or HistoricalBackfillService.DEFAULT_HISTORICAL_START_DATE
-        to_date = args.to_date
-        if not to_date:
-            try:
-                provider_status = TejHQProvider().get_status()
-                to_date = provider_status.trading_date or (date.today() - timedelta(days=1))
-            except Exception:
-                to_date = date.today() - timedelta(days=1)
-
         try:
-            logger.info(
-                "Backfilling %d symbol(s) from %s to %s...",
-                len(symbols_to_backfill),
-                from_date,
-                to_date,
-            )
-            audit = backfill_svc.backfill_instruments(
+            audit = run_backfill_worker(
                 symbols=symbols_to_backfill,
-                from_date=from_date,
-                to_date=to_date,
+                from_date=args.from_date,
+                to_date=args.to_date,
                 resume=not args.no_resume,
                 dry_run=args.dry_run,
             )
@@ -218,8 +205,7 @@ def main() -> int:
             return 1
 
     # Daily EOD Update
-    service = EODUpdateService()
-    result = service.run_update(
+    result = run_eod_worker(
         target_date=args.date,
         force=args.force,
         dry_run=args.dry_run,

@@ -501,22 +501,66 @@ class TestHistoricalPriceAndChart(unittest.TestCase):
         errs = HistoricalBackfillService.validate_bar(negative_vol_bar)
         self.assertTrue(any("Negative volume" in e for e in errs))
 
-    def test_auto_backfill_on_demand(self):
-        """When auto_backfill=true and snapshot count <= 15, on-demand backfill is triggered."""
+    def test_prices_endpoint_is_strictly_read_only(self):
+        """Phase I: GET /prices is strictly read-only and never triggers backfill or writes."""
         with patch.object(
             HistoricalBackfillService,
             "backfill_single_instrument",
             return_value=(1, 1, 0, 0, 0, []),
         ) as mock_bf:
-            # Without auto_backfill parameter -> defaults to False, mock not called
+            # Standard query: mock must never be called
             res_no_bf = self.client.get(f"/api/v1/instruments/{self.rel_id}/prices")
             self.assertEqual(res_no_bf.status_code, 200)
             mock_bf.assert_not_called()
 
-            # With auto_backfill=true -> mock is called
+            # Even if a client passes auto_backfill=true, the endpoint ignores it and does not write
             res_bf = self.client.get(f"/api/v1/instruments/{self.rel_id}/prices?auto_backfill=true")
             self.assertEqual(res_bf.status_code, 200)
-            mock_bf.assert_called_once()
+            mock_bf.assert_not_called()
+
+    def test_empty_price_history_returns_200_empty_list(self):
+        """Instruments with no snapshots return an empty array with 200 OK (never 404 or 500)."""
+        res = self.client.get(f"/api/v1/instruments/{self.tm_dvr_id}/prices")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [])
+
+    def test_api_date_filtering_from_and_to_bounds(self):
+        """API properly respects from and to parameters, returning matching date bounds chronologically."""
+        with self.SessionFactory() as session:
+            for day in range(1, 21):
+                session.add(
+                    DailyMarketSnapshot(
+                        instrument_id=self.rel_id,
+                        source_id=self.source_id,
+                        snapshot_date=date(2026, 10, day),
+                        open_price=Decimal("2000"),
+                        high_price=Decimal("2050"),
+                        low_price=Decimal("1990"),
+                        close_price=Decimal("2010"),
+                        volume=10000,
+                    )
+                )
+            session.commit()
+
+        # Query bounded range: 2026-10-05 to 2026-10-15
+        res = self.client.get(f"/api/v1/instruments/{self.rel_id}/prices?from=2026-10-05&to=2026-10-15")
+        self.assertEqual(res.status_code, 200)
+        bars = res.json()
+        self.assertEqual(len(bars), 11)
+        self.assertEqual(bars[0]["trading_date"], "2026-10-05")
+        self.assertEqual(bars[-1]["trading_date"], "2026-10-15")
+
+    def test_invalid_date_range_and_nonexistent_instrument(self):
+        """Invalid date ranges produce 400 Bad Request; unknown instruments produce 404 Not Found."""
+        # from > to -> 400
+        res_bad = self.client.get(f"/api/v1/instruments/{self.rel_id}/prices?from=2026-10-20&to=2026-10-10")
+        self.assertEqual(res_bad.status_code, 400)
+        self.assertIn("Invalid date range", res_bad.json()["detail"])
+
+        # non-existent instrument -> 404
+        res_404 = self.client.get("/api/v1/instruments/999999/prices")
+        self.assertEqual(res_404.status_code, 404)
+        self.assertIn("Instrument not found", res_404.json()["detail"])
 
 
 if __name__ == "__main__":

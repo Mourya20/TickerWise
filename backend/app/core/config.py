@@ -7,7 +7,7 @@ from sqlalchemy import URL
 class Settings(BaseSettings):
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
-    DB_NAME: str = "tickerwise"
+    DB_NAME: str = "stock_intelligence_workbench"
     DB_USER: str = "siw_app"
     DB_PASSWORD: str = ""
 
@@ -24,31 +24,11 @@ class Settings(BaseSettings):
     TICKERWISE_0XRAMM_BASE_URL: str | None = None
     TICKERWISE_0XRAMM_TIMEOUT_SECONDS: float = 10.0
 
-
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[2] / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
-
-    def _resolve_db_name(self) -> str:
-        # If DB_NAME is tickerwise, test if accessible; otherwise fallback to stock_intelligence_workbench
-        if self.DB_NAME.lower() in ("tickerwise", "ticker_wise"):
-            try:
-                import pymysql
-                conn = pymysql.connect(
-                    host=self.DB_HOST,
-                    port=self.DB_PORT,
-                    user=self.DB_USER,
-                    password=self.DB_PASSWORD,
-                    database=self.DB_NAME,
-                    connect_timeout=1,
-                )
-                conn.close()
-                return self.DB_NAME
-            except Exception:
-                return "stock_intelligence_workbench"
-        return self.DB_NAME
 
     @property
     def database_url(self) -> URL:
@@ -58,7 +38,7 @@ class Settings(BaseSettings):
             password=self.DB_PASSWORD,
             host=self.DB_HOST,
             port=self.DB_PORT,
-            database=self._resolve_db_name(),
+            database=self.DB_NAME,
             query={"charset": "utf8mb4"},
         )
 

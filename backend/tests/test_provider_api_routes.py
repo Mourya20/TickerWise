@@ -122,6 +122,10 @@ class TestProviderApiRoutes(unittest.TestCase):
         Base.metadata.drop_all(cls.engine)
         cls.engine.dispose()
 
+    def setUp(self):
+        from app.api.routes import _remote_status_cache
+        _remote_status_cache.clear()
+
     def test_provider_status_endpoint(self):
         with patch("app.api.routes.TejHQProvider.get_status") as mock_status:
             mock_status.return_value = ProviderStatus(

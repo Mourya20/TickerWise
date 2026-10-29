@@ -88,6 +88,16 @@ describe('InstrumentDetail Component', () => {
     vi.spyOn(api, 'getInstrumentPrices').mockResolvedValue([]);
     vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
     vi.spyOn(api, 'getInstrumentShareCounts').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActionsStatus').mockResolvedValue({
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'synced',
+      last_checked_at: '2026-10-28T00:00:00Z',
+      last_success_at: '2026-10-28T00:00:00Z',
+      events_count: 2,
+      provider_name: 'TejHQ',
+      error_message: null,
+    });
   });
 
   it('renders hero price, delta, and dated market notice', () => {
@@ -239,6 +249,122 @@ describe('InstrumentDetail Component', () => {
       expect(screen.getByText(/dividend ₹12.00 per share/i)).toBeInTheDocument();
       expect(screen.getByText('3,61,80,87,520')).toBeInTheDocument();
       expect(screen.getByText('Direct XBRL')).toBeInTheDocument();
+    });
+  });
+
+  it('displays verified empty state when provider reports 0 actions', async () => {
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActionsStatus').mockResolvedValue({
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'empty',
+      last_checked_at: '2026-10-28T00:00:00Z',
+      last_success_at: '2026-10-28T00:00:00Z',
+      events_count: 0,
+      provider_name: 'TejHQ',
+      error_message: null,
+    });
+
+    render(
+      <ThemeProvider>
+        <InstrumentDetail instrument={mockInstrumentWithSnapshot} onBack={vi.fn()} />
+      </ThemeProvider>
+    );
+
+    const actionsTab = screen.getByRole('tab', { name: /corporate actions/i });
+    fireEvent.click(actionsTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('corporate-actions-empty')).toBeInTheDocument();
+      expect(screen.getByText('Verified Empty')).toBeInTheDocument();
+      expect(screen.getByText(/no corporate actions on record/i)).toBeInTheDocument();
+    });
+  });
+
+  it('displays not synchronized state with CLI instructions when instrument is not synced', async () => {
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActionsStatus').mockResolvedValue({
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'not_synced',
+      last_checked_at: null,
+      last_success_at: null,
+      events_count: 0,
+      provider_name: 'TejHQ',
+      error_message: null,
+    });
+
+    render(
+      <ThemeProvider>
+        <InstrumentDetail instrument={mockInstrumentWithSnapshot} onBack={vi.fn()} />
+      </ThemeProvider>
+    );
+
+    const actionsTab = screen.getByRole('tab', { name: /corporate actions/i });
+    fireEvent.click(actionsTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('corporate-actions-not-synced')).toBeInTheDocument();
+      expect(screen.getByText('Not Synchronized')).toBeInTheDocument();
+      expect(screen.getByText(/python scripts\/sync_corporate_actions.py --symbols TCS/i)).toBeInTheDocument();
+    });
+  });
+
+  it('displays sync failed state when provider synchronization failed', async () => {
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActionsStatus').mockResolvedValue({
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'failed',
+      last_checked_at: '2026-10-28T00:00:00Z',
+      last_success_at: null,
+      events_count: 0,
+      provider_name: 'TejHQ',
+      error_message: 'HTTP 502 Bad Gateway from TejHQ upstream endpoint.',
+    });
+
+    render(
+      <ThemeProvider>
+        <InstrumentDetail instrument={mockInstrumentWithSnapshot} onBack={vi.fn()} />
+      </ThemeProvider>
+    );
+
+    const actionsTab = screen.getByRole('tab', { name: /corporate actions/i });
+    fireEvent.click(actionsTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('corporate-actions-failed')).toBeInTheDocument();
+      expect(screen.getByText('Sync Failed')).toBeInTheDocument();
+      expect(screen.getByText(/HTTP 502 Bad Gateway/i)).toBeInTheDocument();
+    });
+  });
+
+  it('displays partial coverage state when ingestion has partial issues', async () => {
+    vi.spyOn(api, 'getInstrumentCorporateActions').mockResolvedValue([]);
+    vi.spyOn(api, 'getInstrumentCorporateActionsStatus').mockResolvedValue({
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'partial',
+      last_checked_at: '2026-10-28T00:00:00Z',
+      last_success_at: '2026-10-28T00:00:00Z',
+      events_count: 1,
+      provider_name: 'TejHQ',
+      error_message: '2 rows were skipped due to malformed date format.',
+    });
+
+    render(
+      <ThemeProvider>
+        <InstrumentDetail instrument={mockInstrumentWithSnapshot} onBack={vi.fn()} />
+      </ThemeProvider>
+    );
+
+    const actionsTab = screen.getByRole('tab', { name: /corporate actions/i });
+    fireEvent.click(actionsTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('corporate-actions-partial')).toBeInTheDocument();
+      expect(screen.getAllByText('Partial Coverage').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText(/2 rows were skipped due to malformed date format/i)).toBeInTheDocument();
     });
   });
 });

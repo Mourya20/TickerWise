@@ -1,5 +1,6 @@
 import type {
   CorporateAction,
+  CorporateActionSyncStatusResponse,
   InstrumentDetailResponse,
   InstrumentSearchResult,
   PriceBar,
@@ -184,8 +185,8 @@ export async function getInstrumentPrices(
     throw new ApiRequestError('Invalid instrument ID.', 400);
   }
 
-  let autoBackfill = true;
   let abortSignal: AbortSignal | undefined = undefined;
+  let autoBackfill: boolean = false;
 
   if (typeof arg6 === 'boolean') {
     autoBackfill = arg6;
@@ -238,11 +239,9 @@ export async function fetchAllInstrumentPrices(
   arg5?: AbortSignal | boolean,
   arg6?: AbortSignal
 ): Promise<PriceBar[]> {
-  let autoBackfill = true;
   let abortSignal: AbortSignal | undefined = undefined;
 
   if (typeof arg5 === 'boolean') {
-    autoBackfill = arg5;
     abortSignal = arg6;
   } else if (arg5 && typeof (arg5 as AbortSignal).aborted === 'boolean') {
     abortSignal = arg5 as AbortSignal;
@@ -263,7 +262,6 @@ export async function fetchAllInstrumentPrices(
       toDate,
       pageSize,
       currentOffset,
-      autoBackfill && page === 0,
       abortSignal
     );
 
@@ -349,4 +347,93 @@ export async function getInstrumentCorporateActions(
     );
   }
 }
+
+export async function getInstrumentCorporateActionsStatus(
+  instrumentId: number,
+  signal?: AbortSignal
+): Promise<CorporateActionSyncStatusResponse> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/corporate-actions/status`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<CorporateActionSyncStatusResponse>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) {
+      throw error;
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    throw new ApiRequestError(
+      'Unable to load corporate actions synchronization status. Please check your network or server connection.'
+    );
+  }
+}
+
+export async function backfillInstrumentPrices(
+  instrumentId: number,
+  fromDate?: string,
+  toDate?: string,
+  signal?: AbortSignal
+): Promise<{ status: string; symbol: string; bars_read: number; bars_inserted: number }> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const params = new URLSearchParams();
+  if (fromDate) params.set('from', fromDate);
+  if (toDate) params.set('to', toDate);
+  const queryStr = params.toString();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/prices/backfill${queryStr ? `?${queryStr}` : ''}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ApiRequestError('Unable to backfill historical prices. Please check your network or server connection.');
+  }
+}
+
+export async function syncInstrumentCorporateActions(
+  instrumentId: number,
+  signal?: AbortSignal
+): Promise<CorporateActionSyncStatusResponse> {
+  if (!Number.isInteger(instrumentId) || instrumentId <= 0) {
+    throw new ApiRequestError('Invalid instrument ID.', 400);
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}/api/v1/instruments/${instrumentId}/corporate-actions/sync`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    return await handleResponse<CorporateActionSyncStatusResponse>(response);
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ApiRequestError('Unable to synchronize corporate actions. Please check your network or server connection.');
+  }
+}
+
+
 

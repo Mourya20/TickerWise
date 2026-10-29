@@ -12,7 +12,15 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Company, DailyMarketSnapshot, DataSource, Instrument, InstrumentShareCount
+from app.models import (
+    Company,
+    CorporateAction,
+    DailyMarketSnapshot,
+    DataSource,
+    IngestionRun,
+    Instrument,
+    InstrumentShareCount,
+)
 from app.providers.base import NormalizedCorporateAction, NormalizedOHLCV
 from app.providers.nse_shareholding import (
     NSEPermissionStatus,
@@ -441,6 +449,47 @@ class TestStage2Core(unittest.TestCase):
         self.assertEqual(rec.extraction_method, "directly_reported")
         self.assertEqual(rec.face_value, Decimal("1.00"))
         self.assertEqual(rec.source_capital_amount, Decimal("3618087518"))
+
+    def test_all_get_endpoints_are_strictly_read_only(self):
+        """Phase I: Count rows before and after executing every GET endpoint to prove zero write side-effects."""
+        tables = [
+            Company,
+            Instrument,
+            DailyMarketSnapshot,
+            DataSource,
+            IngestionRun,
+            CorporateAction,
+            InstrumentShareCount,
+        ]
+
+        def get_all_counts():
+            with self.TestingSessionLocal() as session:
+                return {model.__name__: session.query(model).count() for model in tables}
+
+        counts_before = get_all_counts()
+
+        # Call all GET endpoints in the system
+        endpoints = [
+            "/health",
+            "/api/v1/instruments?query=TCS",
+            f"/api/v1/instruments/{self.tcs_id}",
+            f"/api/v1/instruments/{self.tcs_id}/prices",
+            f"/api/v1/instruments/{self.tcs_id}/prices?from=2020-01-01&to=2026-10-29",
+            f"/api/v1/instruments/{self.tcs_id}/share-counts",
+            f"/api/v1/instruments/{self.tcs_id}/corporate-actions",
+            "/api/v1/providers/status",
+        ]
+
+        for ep in endpoints:
+            res = self.client.get(ep)
+            self.assertEqual(res.status_code, 200, f"Endpoint {ep} failed with {res.status_code}")
+
+        counts_after = get_all_counts()
+        self.assertEqual(
+            counts_before,
+            counts_after,
+            f"Database mutation detected during GET requests! Before: {counts_before}, After: {counts_after}",
+        )
 
 
 if __name__ == "__main__":

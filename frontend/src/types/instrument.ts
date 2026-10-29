@@ -110,6 +110,17 @@ export interface CorporateAction {
   notes?: string | null;
 }
 
+export interface CorporateActionSyncStatusResponse {
+  instrument_id: number;
+  symbol: string;
+  status: 'synced' | 'empty' | 'not_synced' | 'failed' | 'partial';
+  last_checked_at?: string | null;
+  last_success_at?: string | null;
+  events_count: number;
+  provider_name: string;
+  error_message?: string | null;
+}
+
 export interface InstrumentDetailResponse {
   instrument_id: number;
   company_id: number;

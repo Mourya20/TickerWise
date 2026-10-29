@@ -13,7 +13,7 @@ from app.api.routes import get_instrument, health, search_instruments
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Company, DailyMarketSnapshot, DataSource, Instrument
+from app.models import Company, DailyMarketSnapshot, DataSource, Instrument, InstrumentShareCount
 
 
 class StockSearchApiTests(unittest.TestCase):
@@ -113,6 +113,21 @@ class StockSearchApiTests(unittest.TestCase):
                     traded_value_crores=Decimal("2805.170000"),
                 )
             )
+            session.add(
+                InstrumentShareCount(
+                    id=501,
+                    instrument_id=105,
+                    symbol="TCS",
+                    series="EQ",
+                    share_class="EQUITY",
+                    reporting_date=date(2026, 9, 30),
+                    reported_share_count=1000000000,
+                    fully_paid_shares=1000000000,
+                    source_id=201,
+                    extraction_method="xbrl",
+                    validation_status="verified",
+                )
+            )
             session.commit()
         def override_db():
             with cls.session_factory() as session:
@@ -168,10 +183,9 @@ class StockSearchApiTests(unittest.TestCase):
         self.assertEqual(result.symbol, "RELIANCE")
         self.assertEqual(result.snapshot.snapshot_date, date(2026, 10, 14))
         self.assertEqual(result.snapshot.ltp, Decimal("2304.900000"))
-        self.assertEqual(
-            result.snapshot.market_capitalization_crores,
-            Decimal("833932.990000"),
-        )
+        # When no official share count exists, market_cap is unavailable (None) without silent fallback
+        self.assertIsNone(result.snapshot.market_capitalization_crores)
+        self.assertEqual(result.snapshot.share_count_status, "unavailable")
         self.assertEqual(result.snapshot.volume_lakhs, Decimal("121.460000"))
         self.assertEqual(result.snapshot.traded_value_crores, Decimal("2805.170000"))
 
@@ -325,7 +339,9 @@ class StockSearchApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         snapshot = response.json()["snapshot"]
         self.assertEqual(snapshot["snapshot_date"], "2026-10-14")
-        self.assertEqual(snapshot["market_capitalization_crores"], "833932.990000")
+        self.assertEqual(snapshot["market_capitalization_crores"], "230490.000000")
+        self.assertEqual(snapshot["share_count"], 1000000000)
+        self.assertEqual(snapshot["share_count_status"], "fresh")
         self.assertEqual(snapshot["volume_lakhs"], "121.460000")
         self.assertEqual(snapshot["traded_value_crores"], "2805.170000")
 

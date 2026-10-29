@@ -88,6 +88,8 @@ data/raw/
 data/rejected/
 data/*.csv
 data/**/*.csv
+data/*checkpoint*.json
+*.tmp
 !data/sample_filings/**
 
 # ------------------------------------------------------------------------------

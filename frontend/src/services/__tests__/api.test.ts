@@ -3,8 +3,9 @@ import {
   checkHealth,
   searchInstruments,
   getInstrumentDetail,
-  getInstrumentPrices,
   fetchAllInstrumentPrices,
+  getInstrumentCorporateActions,
+  getInstrumentCorporateActionsStatus,
   ApiRequestError,
   getApiBaseUrl,
 } from '../api';
@@ -190,4 +191,60 @@ describe('API Service Module', () => {
       fetchAllInstrumentPrices(1879, undefined, undefined, 1000, controller.signal)
     ).rejects.toThrow();
   });
+
+  it('rejects invalid instrument IDs for corporate actions status', async () => {
+    await expect(getInstrumentCorporateActionsStatus(-1)).rejects.toThrow(ApiRequestError);
+    await expect(getInstrumentCorporateActionsStatus(0)).rejects.toThrow('Invalid instrument ID.');
+  });
+
+  it('fetches corporate actions status successfully with correct URL', async () => {
+    const mockStatus = {
+      instrument_id: 2304,
+      symbol: 'TCS',
+      status: 'synced',
+      last_checked_at: '2026-10-29T10:00:00Z',
+      last_success_at: '2026-10-29T10:00:00Z',
+      events_count: 5,
+      provider_name: 'TejHQ',
+      error_message: null,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockStatus),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getInstrumentCorporateActionsStatus(2304);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/instruments/2304/corporate-actions/status');
+    expect(result.status).toBe('synced');
+    expect(result.events_count).toBe(5);
+  });
+
+  it('fetches corporate actions list successfully with correct URL', async () => {
+    const mockActions = [
+      {
+        id: 1,
+        instrument_id: 2304,
+        symbol: 'TCS',
+        event_type: 'dividend',
+        ex_date: '2026-10-15',
+        cash_amount: '12.00',
+      },
+    ];
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockActions),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getInstrumentCorporateActions(2304);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/instruments/2304/corporate-actions');
+    expect(result.length).toBe(1);
+    expect(result[0].event_type).toBe('dividend');
+  });
 });
+

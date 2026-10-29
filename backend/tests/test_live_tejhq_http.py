@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
+from app.providers.base import ProviderNetworkError
 from app.providers.tejhq import TejHQProvider
 
 
@@ -18,7 +19,10 @@ class TestLiveTejHQHttp(unittest.TestCase):
         self.provider = TejHQProvider()
 
     def test_live_status_endpoint(self):
-        status = self.provider.get_status()
+        try:
+            status = self.provider.get_status()
+        except ProviderNetworkError as exc:
+            self.skipTest(f"Live TejHQ network endpoint unavailable: {exc}")
         self.assertEqual(status.provider_name, "TejHQ")
         self.assertIsNotNone(status.trading_date)
         self.assertIn(status.stage, ("prices", "derived"))
@@ -27,9 +31,12 @@ class TestLiveTejHQHttp(unittest.TestCase):
 
     def test_live_ohlcv_endpoint(self):
         # Fetch OHLCV history for RELIANCE
-        rows = self.provider.get_historical_ohlcv(
-            "RELIANCE", date(2026, 10, 10), date(2026, 10, 14)
-        )
+        try:
+            rows = self.provider.get_historical_ohlcv(
+                "RELIANCE", date(2026, 10, 10), date(2026, 10, 14)
+            )
+        except ProviderNetworkError as exc:
+            self.skipTest(f"Live TejHQ network endpoint unavailable: {exc}")
         self.assertGreater(len(rows), 0)
         sample = rows[0]
         self.assertEqual(sample.symbol, "RELIANCE")

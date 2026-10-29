@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { InstrumentDetail } from '../components/InstrumentDetail';
+import { InstrumentDetail } from '../features/instruments';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { getInstrumentDetail, ApiRequestError } from '../services/api';

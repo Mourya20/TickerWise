@@ -24,7 +24,7 @@ class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 
     id: Mapped[int] = mapped_column(
-        BigInteger, primary_key=True, autoincrement=True
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
     )
     source_id: Mapped[int] = mapped_column(
         BigInteger,
