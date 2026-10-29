@@ -8,7 +8,12 @@ from typing import Any
 
 import httpx
 
+from app.analytics import calculate_percentage_change
 from app.core.config import settings
+from app.providers.date_parser import (
+    parse_optional_provider_event_date,
+    parse_provider_event_date,
+)
 from app.providers.base import (
     BaseMarketDataProvider,
     NormalizedCorporateAction,
@@ -243,14 +248,8 @@ class TejHQProvider(BaseMarketDataProvider):
             # - `prev_close` is previous day close
             # Never map LTP to close or treat missing close as LTP!
             # Percentage change calculation:
-            pct_change: Decimal | None = None
-            is_calculated = False
-            if close_price is not None and prev_close_price is not None and prev_close_price > 0:
-                pct_change = ((close_price - prev_close_price) / prev_close_price) * Decimal("100")
-                is_calculated = True
-            elif last_price is not None and prev_close_price is not None and prev_close_price > 0:
-                pct_change = ((last_price - prev_close_price) / prev_close_price) * Decimal("100")
-                is_calculated = True
+            target_price = close_price if close_price is not None else last_price
+            pct_change, is_calculated = calculate_percentage_change(target_price, prev_close_price)
 
             results.append(
                 NormalizedMarketSnapshot(
@@ -352,24 +351,49 @@ class TejHQProvider(BaseMarketDataProvider):
             )
 
         results: list[NormalizedCorporateAction] = []
+        malformed_count = 0
+
         for row in data_rows:
             if not isinstance(row, dict):
-                continue
-            ex_date_str = row.get("ex_date")
-            if not ex_date_str:
-                continue
-            try:
-                ex_date = datetime.strptime(str(ex_date_str), "%Y-%m-%d").date()
-            except ValueError:
+                malformed_count += 1
+                logger.warning("TejHQ action row skipped (not a dictionary): %s", row)
                 continue
 
-            rec_date_str = row.get("record_date")
-            rec_date: date | None = None
-            if rec_date_str:
-                try:
-                    rec_date = datetime.strptime(str(rec_date_str), "%Y-%m-%d").date()
-                except ValueError:
-                    rec_date = None
+            raw_ex_date = row.get("ex_date")
+            try:
+                ex_date = parse_provider_event_date(raw_ex_date)
+            except ValueError as exc:
+                malformed_count += 1
+                logger.warning(
+                    "TejHQ action row for %s skipped due to invalid ex_date '%s': %s",
+                    clean_symbol,
+                    raw_ex_date,
+                    exc,
+                )
+                continue
+
+            raw_rec_date = row.get("record_date")
+            try:
+                rec_date = parse_optional_provider_event_date(raw_rec_date)
+            except ValueError as exc:
+                logger.warning(
+                    "TejHQ action row for %s has invalid record_date '%s', proceeding with None: %s",
+                    clean_symbol,
+                    raw_rec_date,
+                    exc,
+                )
+                rec_date = None
+
+            raw_action_type = str(row.get("type") or row.get("action_type") or "other").strip().lower()
+            normalized_type = (
+                "dividend" if "dividend" in raw_action_type
+                else "split" if "split" in raw_action_type or "sub-division" in raw_action_type
+                else "bonus" if "bonus" in raw_action_type
+                else "rights" if "rights" in raw_action_type
+                else "demerger" if "demerger" in raw_action_type
+                else "buyback" if "buyback" in raw_action_type
+                else raw_action_type
+            )
 
             results.append(
                 NormalizedCorporateAction(
@@ -379,14 +403,17 @@ class TejHQProvider(BaseMarketDataProvider):
                     company_name=str(row.get("company", "")).strip() or None,
                     ex_date=ex_date,
                     record_date=rec_date,
-                    action_type=str(row.get("type", "other")).strip().lower(),
+                    action_type=normalized_type,
                     ratio_num=_parse_int(row.get("ratio_num"), "ratio_num"),
                     ratio_den=_parse_int(row.get("ratio_den"), "ratio_den"),
-                    cash_amount=_parse_decimal(row.get("cash_amount"), "cash_amount"),
+                    cash_amount=_parse_decimal(row.get("cash_amount") if row.get("cash_amount") is not None else row.get("amount"), "cash_amount"),
                     face_value_from=_parse_decimal(row.get("face_value_from"), "face_value_from"),
                     face_value_to=_parse_decimal(row.get("face_value_to"), "face_value_to"),
                     raw_subject=str(row.get("raw_subject", "")).strip() or None,
                 )
             )
+
+        if malformed_count > 0:
+            logger.info("TejHQ get_actions for %s: %d valid actions returned, %d malformed rows skipped", clean_symbol, len(results), malformed_count)
 
         return results

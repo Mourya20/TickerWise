@@ -140,8 +140,8 @@ class NormalizedCorporateAction:
     raw_subject: str | None = None
 
 
-class BaseMarketDataProvider(ABC):
-    """Abstract interface that all market data providers must implement."""
+class IEODSnapshotProvider(ABC):
+    """Capability interface for End-of-Day (EOD) market snapshot providers."""
 
     @abstractmethod
     def get_status(self) -> ProviderStatus:
@@ -155,6 +155,10 @@ class BaseMarketDataProvider(ABC):
         """Fetch complete market snapshot for a specified trading date."""
         raise NotImplementedError
 
+
+class IHistoricalOHLCVProvider(ABC):
+    """Capability interface for historical daily OHLCV price providers."""
+
     @abstractmethod
     def get_historical_ohlcv(
         self, symbol: str, from_date: date, to_date: date, exchange: str = "NSE"
@@ -162,7 +166,42 @@ class BaseMarketDataProvider(ABC):
         """Fetch historical daily OHLCV rows for a single symbol over a date range."""
         raise NotImplementedError
 
+
+class ICorporateActionsProvider(ABC):
+    """Capability interface for corporate actions (splits, bonuses, dividends)."""
+
+    @abstractmethod
     def get_actions(self, symbol: str) -> list[NormalizedCorporateAction]:
         """Fetch corporate actions for a single symbol."""
+        raise NotImplementedError
+
+
+class IInstrumentMasterProvider(ABC):
+    """Capability interface for instrument and company master discovery providers."""
+
+    @abstractmethod
+    def get_instrument_master(
+        self, exchange: str = "NSE"
+    ) -> list[NormalizedMarketSnapshot]:
+        """Fetch security definitions and master metadata."""
+        raise NotImplementedError
+
+
+class IFundamentalDisclosuresProvider(ABC):
+    """Capability interface for fundamental disclosures (e.g. SEBI shareholding patterns)."""
+
+    @abstractmethod
+    def get_disclosures(
+        self, symbol: str
+    ) -> list[object]:
+        """Fetch official fundamental filings or disclosures for a symbol."""
+        raise NotImplementedError
+
+
+class BaseMarketDataProvider(IEODSnapshotProvider, IHistoricalOHLCVProvider, ICorporateActionsProvider, ABC):
+    """Consolidated market data provider interface implementing core market capabilities."""
+
+    def get_actions(self, symbol: str) -> list[NormalizedCorporateAction]:
+        """Default corporate actions implementation."""
         return []
 

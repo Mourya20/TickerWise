@@ -92,7 +92,7 @@ flowchart TD
 
     subgraph Backend Layer ["FastAPI Backend (app/main.py)"]
         FastAPI["FastAPI HTTP Server (Port 8000)"]
-        Routes["API Endpoints (app/api/routes.py)"]
+        Routes["Modular API Routers (app/api/router.py & endpoints/)"]
         Schemas["Pydantic v2 Schemas (app/schemas/)"]
         ORM["SQLAlchemy 2.0 ORM Models (app/models/)"]
         Alembic["Alembic Database Migrations"]
@@ -140,9 +140,55 @@ flowchart TD
 D:\Stock-Intelligence-Workbench\
 ├── backend\                        # Python FastAPI backend application
 │   ├── app\
-│   │   ├── api\                    # HTTP API route definitions
+│   │   ├── analytics\              # Authoritative pure financial rules & units
 │   │   │   ├── __init__.py
-│   │   │   └── routes.py           # /health, /api/v1/instruments, /api/v1/providers/status, /prices, /share-counts
+│   │   │   ├── calculations.py         # Deterministic formulas (market cap, pct change, divergence, CA adjustments)
+│   │   │   ├── units.py                # Volume in Lakhs, Turnover in Crores conversions
+│   │   │   ├── constants.py            # Canonical thresholds, sources, and run statuses
+│   │   │   └── service.py              # Consolidated MarketCapService domain implementation
+│   │   ├── api\                    # HTTP API router & modular endpoint handlers
+│   │   │   ├── __init__.py
+│   │   │   ├── router.py               # Central APIRouter aggregator
+│   │   │   ├── common.py               # Shared DB error mapping
+│   │   │   ├── routes.py               # Backward-compatible re-export facade
+│   │   │   └── endpoints\              # Modular domain endpoint routers
+│   │   │       ├── health.py           # GET /health
+│   │   │       ├── instruments.py      # GET /api/v1/instruments, /api/v1/instruments/{id}
+│   │   │       ├── market_data.py      # GET /api/v1/instruments/{id}/prices
+│   │   │       ├── corporate_actions.py# GET /api/v1/instruments/{id}/corporate-actions
+│   │   │       ├── share_counts.py     # GET /api/v1/instruments/{id}/share-counts
+│   │   │       └── providers.py        # GET /api/v1/providers/status (with bounded TTL cache)
+│   │   ├── corporate_actions\      # Corporate actions domain module
+│   │   │   ├── __init__.py
+│   │   │   └── service.py              # Corporate action ingestion, splits/bonuses adjustment
+│   │   ├── fundamentals\           # Fundamentals & share capital domain module
+│   │   │   ├── __init__.py
+│   │   │   └── share_capital_service.py # Official dated share capital resolution
+│   │   ├── ingestion\              # Reusable ingestion workflows & CSV importers
+│   │   │   ├── __init__.py
+│   │   │   ├── equity_master_importer.py # Equity master CSV ingestion & company deduplication
+│   │   │   ├── market_snapshot_importer.py # Market snapshot CSV ingestion & duplicate classification
+│   │   │   └── shareholding_importer.py # Shareholding filing ingestion interface
+│   │   ├── instruments\            # Instrument catalog domain module
+│   │   │   ├── __init__.py
+│   │   │   ├── catalog.py              # Entity resolution, company deduplication, ISIN validation
+│   │   │   └── discovery.py            # Automated IPO & new listing onboarding
+│   │   ├── market_data\            # Market data domain module
+│   │   │   ├── __init__.py
+│   │   │   ├── backfill.py             # Historical OHLCV backfill engine
+│   │   │   └── service.py              # EOD daily synchronization service
+│   │   ├── queries\                # Read-only database query layer (strictly zero mutations)
+│   │   │   ├── __init__.py
+│   │   │   ├── instrument_queries.py   # Instrument search, detail & associated run queries
+│   │   │   ├── market_data_queries.py  # Historical OHLCV & price history queries
+│   │   │   ├── corporate_action_queries.py # Corporate action history queries
+│   │   │   ├── share_count_queries.py  # Reported share count disclosure queries
+│   │   │   └── freshness_queries.py    # Snapshot data freshness calculation from persisted records
+│   │   ├── workers\                # Background workers & scheduled execution layer
+│   │   │   ├── __init__.py
+│   │   │   ├── eod_worker.py           # Daily EOD ingestion worker & catch-up runner
+│   │   │   ├── backfill_worker.py      # Resumable historical price backfill worker
+│   │   │   └── shareholding_worker.py  # Shareholding disclosure ingestion worker
 │   │   ├── core\                   # Core configuration and Pydantic settings
 │   │   │   ├── __init__.py
 │   │   │   └── config.py           # Environment variables and DB connection resolver
@@ -169,26 +215,38 @@ D:\Stock-Intelligence-Workbench\
 │   │   │   ├── __init__.py
 │   │   │   ├── instrument.py       # InstrumentSearchResult, MarketSnapshotResponse, PriceBarResponse, ShareCountHistoryResponse
 │   │   │   └── provider.py         # ProviderStatusResponse, ProviderInfo
-│   │   ├── services\               # Business logic & ingestion workflows
+│   │   ├── services\               # Backward-compatible service facades
 │   │   │   ├── __init__.py
-│   │   │   ├── eod_update_service.py # EOD update coordination, catch-up & idempotency
-│   │   │   ├── historical_backfill_service.py # Historical OHLCV backfill engine
-│   │   │   └── market_cap_service.py # Market capitalization computation engine & provenance
+│   │   │   ├── corporate_action_service.py # Facade -> app.corporate_actions.service
+│   │   │   ├── eod_update_service.py   # Facade -> app.ingestion.eod_service
+│   │   │   ├── historical_backfill_service.py # Facade -> app.market_data.backfill
+│   │   │   ├── instrument_discovery_service.py # Facade -> app.instruments.discovery
+│   │   │   └── market_cap_service.py   # Facade -> app.analytics.service
 │   │   ├── __init__.py
 │   │   └── main.py                 # FastAPI application factory & CORS configuration
 │   ├── migrations\                 # Alembic migration scripts
-│   │   ├── versions\               # Versioned migration revisions (head: 5591426eb9fc)
+│   │   ├── versions\               # Versioned migration revisions (head: d0fb4a78fe90)
 │   │   └── env.py                  # Alembic runner configuration
-│   ├── tests\                      # Python unittest test suite (81 tests)
-│   │   ├── test_stock_search_api.py # In-memory search & detail API tests
-│   │   ├── test_eod_update_service.py # Ingestion & price divergence tests
-│   │   ├── test_tejhq_provider.py  # TejHQ adapter mock & parsing tests
+│   ├── tests\                      # Python unittest test suite (206 tests)
+│   │   ├── test_corporate_actions.py   # Corporate action ingestion, dedup, and adjustment tests
+│   │   ├── test_historical_price_and_chart.py # Price history & chart data path tests
+│   │   ├── test_domain_modules.py      # Domain modules validation (instruments, market data, fundamentals, actions)
+│   │   ├── test_workers.py             # Background workers & scheduled job runner tests
+│   │   ├── test_ingestion_layer.py     # Ingestion workflows, parsing & deduplication tests
+│   │   ├── test_read_only_query_layer.py # Read-only query layer & zero mutation guarantee tests
+│   │   ├── test_analytics_pure_rules.py # Pure financial formulas & conversion tests
+│   │   ├── test_api_router_modularization.py # Router modularization & backward-compatible routes tests
+│   │   ├── test_stock_search_api.py    # In-memory search & detail API tests
+│   │   ├── test_eod_update_service.py  # Ingestion & price divergence tests
+│   │   ├── test_tejhq_provider.py      # TejHQ adapter mock & parsing tests
 │   │   ├── test_zero_x_ramm_provider.py # 0xramm permission gate tests
 │   │   ├── test_market_snapshot_importer.py # Snapshot parser tests
 │   │   ├── test_provider_api_routes.py # Provider status API tests
+│   │   ├── test_provider_independence.py # Provider isolation, latency & fallback tests
+│   │   ├── test_instrument_discovery.py # IPO and new listing onboarding tests
 │   │   ├── test_live_mysql_integration.py # Live local MySQL integration tests
-│   │   ├── test_live_tejhq_http.py # Live TejHQ upstream HTTP verification tests
-│   │   └── test_stage2_core.py     # Stage 2 backfill, share counts, market cap, and price API tests
+│   │   ├── test_live_tejhq_http.py     # Live TejHQ upstream HTTP verification tests
+│   │   └── test_stage2_core.py         # Stage 2 backfill, share counts, market cap, and price API tests
 │   ├── alembic.ini                 # Alembic migration runner configuration
 │   ├── requirements.txt            # Production dependencies
 │   ├── requirements-dev.txt        # Development and testing dependencies
@@ -197,16 +255,20 @@ D:\Stock-Intelligence-Workbench\
 │   ├── src\
 │   │   ├── __tests__\              # Frontend end-to-end component tests
 │   │   │   └── App.test.tsx        # Search, detail, error, and navigation tests
-│   │   ├── components\             # UI components
+│   │   ├── features\               # Feature-oriented domain modules
+│   │   │   ├── search\             # SearchBar, SearchResults, search state
+│   │   │   ├── charts\             # PriceChart (Lightweight Charts v5.2.1), range options
+│   │   │   └── instruments\        # InstrumentDetail, hero price, metrics, corporate actions
+│   │   ├── components\             # UI components & backward-compatible feature facades
 │   │   │   ├── __tests__\
 │   │   │   │   ├── PriceChart.test.tsx # PriceChart range, hover inspect, empty/error tests
 │   │   │   │   └── InstrumentDetail.test.tsx # Market cap provenance & chart integration tests
 │   │   │   ├── AppShell.tsx        # Persistent shell with sidebar & header top-bar
 │   │   │   ├── Sidebar.tsx         # Navigation sidebar with theme toggle switch
-│   │   │   ├── SearchBar.tsx       # Search input with debounced validation
-│   │   │   ├── SearchResults.tsx   # Search results table & empty state
-│   │   │   ├── InstrumentDetail.tsx# Security master details, market cap provenance & PriceChart
-│   │   │   ├── PriceChart.tsx      # Candlestick + Volume Chart with Lightweight Charts v5.2.1
+│   │   │   ├── SearchBar.tsx       # Re-export facade -> features/search
+│   │   │   ├── SearchResults.tsx   # Re-export facade -> features/search
+│   │   │   ├── InstrumentDetail.tsx# Re-export facade -> features/instruments
+│   │   │   ├── PriceChart.tsx      # Re-export facade -> features/charts
 │   │   │   ├── ConnectionStatus.tsx# Live backend health & EOD freshness pill
 │   │   │   ├── LoadingSkeleton.tsx # Shimmer loading skeletons
 │   │   │   ├── ErrorMessage.tsx    # API error banner with retry trigger
@@ -234,9 +296,11 @@ D:\Stock-Intelligence-Workbench\
 │   ├── tsconfig.json               # TypeScript compiler configuration
 │   ├── vite.config.ts              # Vite bundler & test runner configuration
 │   └── .env.example                # Frontend environment variable template
-├── scripts\                        # Automation scripts & operational tools
+├── scripts\                        # Automation scripts & operational tools (thin wrappers around app.workers)
 │   ├── run_eod_update.py           # CLI entry point for EOD updates, catch-up & backfills
 │   ├── import_nse_shareholding.py  # CLI for official NSE shareholding disclosures
+│   ├── import_equity_master.py     # CLI for equity master ingestion
+│   ├── import_market_snapshot.py   # CLI for market snapshot CSV ingestion
 │   └── run_eod_scheduled.ps1       # Windows Task Scheduler runner with lockfile guard & catch-up
 ├── data\                           # Data files and sample disclosures
 │   └── sample_filings\             # Authorized sample XBRL XML, JSON, and CSV shareholding filings
@@ -320,7 +384,7 @@ Apply all versioned Alembic migrations to bring the database schema to head:
 Verify current migration head:
 ```powershell
 .\.venv\Scripts\alembic.exe current
-# Expected output: abd19b6efea6 (head)
+# Expected output: d0fb4a78fe90 (head)
 ```
 
 ### 4. Frontend Environment Setup
@@ -752,8 +816,8 @@ The frontend uses Vitest, React Testing Library, and JSDOM:
 ```powershell
 Set-Location frontend
 
-# Run all component and unit tests (49 tests)
-npm test
+# Run all component and unit tests (63 tests)
+npm test -- --run
 
 # Run tests in watch mode
 npm run test:watch
@@ -761,7 +825,7 @@ npm run test:watch
 # Execute production TypeScript compile and Vite bundle
 npm run build
 ```
-*Current Status*: **49 passed (49 tests)**. Production bundle builds cleanly in ~360ms with zero errors.
+*Current Status*: **63 passed (63 tests)** across 5 suites. Production bundle builds cleanly in ~420ms with zero errors.
 
 ### 2. Backend Test Suite
 The backend uses Python `unittest`. Run tests from the project root:
@@ -769,10 +833,34 @@ The backend uses Python `unittest`. Run tests from the project root:
 # Set environment
 $env:PYTHONPATH="backend"
 
-# Run complete test suite across all modules (81 tests)
+# Run complete test suite across all modules (206 tests)
 .\backend\.venv\Scripts\python.exe -m unittest discover -s backend/tests -p "test_*.py"
 
-# Run Stage 2 core unit test suite (13 tests)
+# Run corporate actions and adjustments test suite (33 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_corporate_actions.py
+
+# Run historical prices and price chart test suite (12 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_historical_price_and_chart.py
+
+# Run provider independence, latency & fallback test suite (11 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_provider_independence.py
+
+# Run domain modules test suite (10 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_domain_modules.py
+
+# Run background workers test suite (10 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_workers.py
+
+# Run pure financial calculations and rules test suite (10 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_analytics_pure_rules.py
+
+# Run read-only query layer test suite (9 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_read_only_query_layer.py
+
+# Run modular API routes test suite (8 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_api_router_modularization.py
+
+# Run Stage 2 core unit test suite (17 tests)
 .\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_stage2_core.py
 
 # Run isolated stock search & detail API tests (23 tests)
@@ -780,6 +868,9 @@ $env:PYTHONPATH="backend"
 
 # Run EOD ingestion service tests (9 tests)
 .\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_eod_update_service.py
+
+# Run instrument discovery and IPO onboarding tests (11 tests)
+.\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_instrument_discovery.py
 
 # Run TejHQ adapter mock tests (9 tests)
 .\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_tejhq_provider.py
@@ -796,7 +887,7 @@ $env:PYTHONPATH="backend"
 # Run live TejHQ upstream HTTP verification tests (requires internet access)
 .\backend\.venv\Scripts\python.exe -m unittest backend/tests/test_live_tejhq_http.py
 ```
-*Current Status*: **81 passed (81 tests)** across all suites (100% pass rate). Total project tests: **130 tests passing**.
+*Current Status*: **206 passed (206 tests)** across all 18 suites (100% pass rate). Total project tests: **269 automated tests passing** (206 backend + 63 frontend).
 
 ---
 

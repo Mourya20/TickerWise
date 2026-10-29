@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { SearchResults } from '../components/SearchResults';
+import { SearchResults } from '../features/search';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { searchInstruments, ApiRequestError } from '../services/api';

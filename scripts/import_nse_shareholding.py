@@ -15,6 +15,11 @@ from app.providers.nse_shareholding import (  # noqa: E402
     NSEShareholdingParser,
     ParsedShareCount,
 )
+from app.workers import (  # noqa: E402
+    check_nse_permissions,
+    parse_filing_file,
+    run_shareholding_worker,
+)
 
 logger = logging.getLogger("import_shareholding")
 

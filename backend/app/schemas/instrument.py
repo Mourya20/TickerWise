@@ -145,3 +145,17 @@ class CorporateActionResponse(BaseModel):
     validation_status: str
     notes: str | None = None
 
+
+class CorporateActionSyncStatusResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    instrument_id: int
+    symbol: str
+    status: str  # "synced", "empty", "not_synced", "failed", "partial"
+    last_checked_at: datetime | None = None
+    last_success_at: datetime | None = None
+    events_count: int = 0
+    provider_name: str = "TejHQ"
+    error_message: str | None = None
+
+

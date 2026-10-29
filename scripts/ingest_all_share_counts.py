@@ -1,8 +1,22 @@
-"""Ingest official dated share counts for all instruments from NSE official market snapshot.
+"""DEPRECATED AND UNSAFE FOR PRODUCTION INGESTION.
 
-Populates instrument_share_counts with post-corporate-action outstanding share counts
-derived from official NSE Market Capitalization and LTP disclosures, and backfills
-daily_market_snapshots with defensible market_capitalization_crores.
+This script was originally run to backfill share counts derived from NSE market snapshot CSVs
+by dividing Market Cap by LTP:
+    reported_share_count = round((market_cap_crores * 10,000,000) / ltp)
+
+Financial Data Engineering Warning (Phase B Data Integrity):
+-----------------------------------------------------------
+Reverse-deriving share counts from rounded Market Cap and LTP introduces rounding distortion
+and conflates price quotations with actual corporate share capital. It lacks SEBI LODR Regulation 31
+filing context, paid-up vs partly-paid classification, face value verification, and official filing
+dates.
+
+In accordance with SIW Architecture Policy:
+1. This script is permanently deprecated and locked.
+2. Official share counts must only be ingested from validated SEBI LODR Regulation 31 XBRL filings
+   via NSEShareholdingIngestionService or confirmed exchange corporate action announcements.
+3. Existing records ingested by this script in instrument_share_counts are explicitly tagged with
+   extraction_method='official_nse_market_cap_derived' and validation_status='unverified_fallback'.
 """
 from __future__ import annotations
 
@@ -316,4 +330,8 @@ def run_ingestion() -> None:
 
 
 if __name__ == "__main__":
-    run_ingestion()
+    raise RuntimeError(
+        "scripts/ingest_all_share_counts.py is DEPRECATED and disabled by architecture policy. "
+        "Reverse-deriving share counts from Market Cap and LTP conflates price quotes with capital structure "
+        "and bypasses SEBI LODR XBRL validation. Use NSEShareholdingIngestionService instead."
+    )

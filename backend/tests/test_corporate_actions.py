@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -13,7 +14,10 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import Company, CorporateAction, DailyMarketSnapshot, DataSource, Instrument, InstrumentShareCount
+from app.models.ingestion_run import IngestionRun
 from app.providers.base import NormalizedCorporateAction
+from app.providers.date_parser import parse_provider_event_date, parse_optional_provider_event_date
+from app.providers.tejhq import TejHQProvider
 from app.services.corporate_action_service import (
     CorporateActionService,
     generate_dedup_key,
@@ -481,3 +485,320 @@ class TestCorporateActionsAndShareCapital(unittest.TestCase):
         response = self.client.get("/api/v1/instruments/999999/corporate-actions")
         self.assertEqual(response.status_code, 404)
         self.assertIn("Instrument not found", response.json()["detail"])
+
+    def test_resolve_instrument_by_isin(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            inst, status = svc.resolve_instrument(session, symbol="RELIANCE", isin="INE002A01018")
+            self.assertIsNotNone(inst)
+            self.assertEqual(inst.id, 101)
+            self.assertEqual(inst.isin, "INE002A01018")
+            self.assertEqual(status, "matched_isin")
+
+    def test_resolve_instrument_by_symbol_and_exchange(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            inst, status = svc.resolve_instrument(session, symbol="RELIANCE", exchange="NSE")
+            self.assertIsNotNone(inst)
+            self.assertEqual(inst.id, 101)
+            self.assertEqual(inst.symbol, "RELIANCE")
+            self.assertEqual(status, "matched_symbol")
+
+    def test_resolve_instrument_quarantines_ambiguous_multi_series(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            comp2 = Company(id=2, name="Tata Motors Limited")
+            session.add(comp2)
+            session.flush()
+
+            inst_eq = Instrument(
+                id=201,
+                company_id=2,
+                exchange="NSE",
+                symbol="TATAMOTORS",
+                series="EQ",
+                isin="INE155A01022",
+                is_active=True,
+            )
+            inst_dvr = Instrument(
+                id=202,
+                company_id=2,
+                exchange="NSE",
+                symbol="TATAMOTORS",
+                series="DVR",
+                isin="IN9155A01020",
+                is_active=True,
+            )
+            session.add_all([inst_eq, inst_dvr])
+            session.commit()
+
+            resolved, status = svc.resolve_instrument(session, symbol="TATAMOTORS", exchange="NSE")
+            self.assertIsNone(resolved)
+            self.assertEqual(status, "ambiguous")
+
+            resolved_dvr, status_dvr = svc.resolve_instrument(session, symbol="TATAMOTORS", isin="IN9155A01020")
+            self.assertIsNotNone(resolved_dvr)
+            self.assertEqual(resolved_dvr.id, 202)
+            self.assertEqual(status_dvr, "matched_isin")
+
+    def test_resolve_instrument_never_creates_duplicate_entities(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            count_before_inst = session.query(Instrument).count()
+            count_before_comp = session.query(Company).count()
+
+            resolved, status = svc.resolve_instrument(session, symbol="UNKNOWNCO", exchange="NSE")
+            self.assertIsNone(resolved)
+            self.assertEqual(status, "unmatched")
+
+            count_after_inst = session.query(Instrument).count()
+            count_after_comp = session.query(Company).count()
+
+            self.assertEqual(count_before_inst, count_after_inst)
+            self.assertEqual(count_before_comp, count_after_comp)
+
+    def test_intra_batch_deduplication_in_memory(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            batch_data = [
+                {
+                    "symbol": "RELIANCE",
+                    "exchange": "NSE",
+                    "event_type": "dividend",
+                    "ex_date": date(2026, 9, 20),
+                    "cash_amount": Decimal("10.0"),
+                    "status": "completed",
+                    "notes": "First occurrence in batch",
+                },
+                {
+                    "symbol": "RELIANCE",
+                    "exchange": "NSE",
+                    "event_type": "dividend",
+                    "ex_date": date(2026, 9, 20),
+                    "cash_amount": Decimal("10.0"),
+                    "status": "completed",
+                    "notes": "Duplicate occurrence in batch",
+                },
+            ]
+
+            result = svc.ingest_actions(session, batch_data, source_id=1)
+            session.commit()
+
+            # Both entries reconcile onto the single entity in-memory and database
+            self.assertIs(result[0], result[1])
+            persisted = session.query(CorporateAction).filter_by(
+                symbol="RELIANCE",
+                event_type="dividend",
+                ex_date=date(2026, 9, 20),
+            ).all()
+            self.assertEqual(len(persisted), 1)
+
+    def test_get_adjustment_factor_reads_from_database_pure_query(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            session.add(
+                CorporateAction(
+                    instrument_id=101,
+                    exchange="NSE",
+                    symbol="RELIANCE",
+                    event_type="bonus",
+                    dedup_key="NSE:RELIANCE:bonus:2026-08-01:R1_1",
+                    ex_date=date(2026, 8, 1),
+                    ratio_num=1,
+                    ratio_den=1,
+                    status="completed",
+                    source_id=1,
+                    validation_status="valid",
+                )
+            )
+            session.commit()
+
+            # Calling get_adjustment_factor should compute factor 2.0 (share count doubles) without any remote HTTP calls
+            adj = svc.get_adjustment_factor("RELIANCE", date(2026, 7, 1), date(2026, 9, 1), session=session)
+            self.assertEqual(adj.factor, Decimal("2.0"))
+
+            # Factor for dates after ex-date is 1.0
+            adj_post = svc.get_adjustment_factor("RELIANCE", date(2026, 8, 5), date(2026, 9, 1), session=session)
+            self.assertEqual(adj_post.factor, Decimal("1.000000"))
+
+    def test_record_and_get_sync_status(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            # 1. Initially unsynced
+            status_init = svc.get_sync_status(session, "RELIANCE")
+            self.assertEqual(status_init["status"], "not_synced")
+            self.assertEqual(status_init["events_count"], 0)
+
+            # 2. Record successful sync with 2 events
+            svc.record_sync_status(
+                session,
+                symbol="RELIANCE",
+                status="completed",
+                records_read=2,
+                records_inserted=2,
+            )
+            session.commit()
+
+            status_synced = svc.get_sync_status(session, "RELIANCE")
+            self.assertEqual(status_synced["status"], "synced")
+            self.assertEqual(status_synced["events_count"], 2)
+            self.assertIsNotNone(status_synced["last_success_at"])
+
+            # 3. Record verified empty check
+            svc.record_sync_status(
+                session,
+                symbol="RELIANCE",
+                status="empty",
+                records_read=0,
+            )
+            session.commit()
+
+            status_empty = svc.get_sync_status(session, "RELIANCE")
+            self.assertEqual(status_empty["status"], "empty")
+            self.assertEqual(status_empty["events_count"], 0)
+
+            # 4. Record failure
+            svc.record_sync_status(
+                session,
+                symbol="RELIANCE",
+                status="failed",
+                error_summary="HTTP 502 Bad Gateway",
+            )
+            session.commit()
+
+            status_failed = svc.get_sync_status(session, "RELIANCE")
+            self.assertEqual(status_failed["status"], "failed")
+            self.assertEqual(status_failed["error_message"], "HTTP 502 Bad Gateway")
+
+    def test_corporate_actions_status_endpoint(self):
+        svc = CorporateActionService()
+        with self.TestingSessionLocal() as session:
+            svc.record_sync_status(
+                session,
+                symbol="RELIANCE",
+                status="completed",
+                records_read=5,
+                records_inserted=5,
+            )
+            session.commit()
+
+        response = self.client.get("/api/v1/instruments/101/corporate-actions/status")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["instrument_id"], 101)
+        self.assertEqual(data["symbol"], "RELIANCE")
+        self.assertEqual(data["status"], "synced")
+        self.assertEqual(data["events_count"], 5)
+        self.assertEqual(data["provider_name"], "TejHQ")
+
+    def test_corporate_actions_get_endpoint_is_strictly_read_only(self):
+        # Verify that GET endpoint makes zero database writes and does not invoke provider
+        with self.TestingSessionLocal() as session:
+            actions_before = session.query(CorporateAction).count()
+            runs_before = session.query(IngestionRun).count()
+
+        with patch("app.providers.tejhq.TejHQProvider.get_actions") as mock_get_actions:
+            response = self.client.get("/api/v1/instruments/101/corporate-actions")
+            self.assertEqual(response.status_code, 200)
+            mock_get_actions.assert_not_called()
+
+        with self.TestingSessionLocal() as session:
+            actions_after = session.query(CorporateAction).count()
+            runs_after = session.query(IngestionRun).count()
+
+        self.assertEqual(actions_before, actions_after)
+        self.assertEqual(runs_before, runs_after)
+
+
+class TestDateParser(unittest.TestCase):
+    def test_parse_date_only_format(self):
+        self.assertEqual(parse_provider_event_date("2026-10-15"), date(2026, 10, 15))
+
+    def test_parse_iso_zulu_timestamp(self):
+        self.assertEqual(parse_provider_event_date("2026-10-15T00:00:00Z"), date(2026, 10, 15))
+        self.assertEqual(parse_provider_event_date("2026-10-15T23:59:59Z"), date(2026, 10, 15))
+
+    def test_parse_iso_fractional_seconds_zulu(self):
+        self.assertEqual(parse_provider_event_date("2026-10-15T05:30:00.123456Z"), date(2026, 10, 15))
+
+    def test_parse_iso_with_offsets(self):
+        self.assertEqual(parse_provider_event_date("2026-10-15T05:30:00+05:30"), date(2026, 10, 15))
+        self.assertEqual(parse_provider_event_date("2026-10-15T23:00:00-04:00"), date(2026, 10, 15))
+
+    def test_parse_space_separated(self):
+        self.assertEqual(parse_provider_event_date("2026-10-15 12:30:00"), date(2026, 10, 15))
+
+    def test_parse_date_and_datetime_objects(self):
+        self.assertEqual(parse_provider_event_date(date(2026, 10, 15)), date(2026, 10, 15))
+        self.assertEqual(parse_provider_event_date(datetime(2026, 10, 15, 18, 45)), date(2026, 10, 15))
+
+    def test_parse_preserves_stated_calendar_day(self):
+        # A stated calendar event date of 2026-10-15 with late UTC time must remain 2026-10-15
+        self.assertEqual(parse_provider_event_date("2026-10-15T23:59:59Z"), date(2026, 10, 15))
+
+    def test_parse_invalid_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            parse_provider_event_date("not-a-date")
+        with self.assertRaises(ValueError):
+            parse_provider_event_date("")
+        with self.assertRaises(ValueError):
+            parse_provider_event_date(None)
+        with self.assertRaises(ValueError):
+            parse_provider_event_date("2026/10/15")
+
+    def test_parse_optional_provider_event_date(self):
+        self.assertIsNone(parse_optional_provider_event_date(None))
+        self.assertIsNone(parse_optional_provider_event_date(""))
+        self.assertIsNone(parse_optional_provider_event_date("invalid"))
+        self.assertEqual(parse_optional_provider_event_date("2026-10-15T00:00:00Z"), date(2026, 10, 15))
+
+
+class TestTejHQCorporateActionsProvider(unittest.TestCase):
+    @patch.object(TejHQProvider, "_request_with_retry")
+    def test_provider_normalizes_and_skips_malformed(self, mock_req):
+        mock_req.return_value = {
+            "data": [
+                {
+                    "symbol": "RELIANCE",
+                    "purpose": "Dividend - Rs 10 per share",
+                    "action_type": "DIVIDEND",
+                    "ex_date": "2026-08-15T00:00:00Z",
+                    "record_date": "2026-08-16T00:00:00Z",
+                    "amount": 10.0,
+                },
+                {
+                    "symbol": "RELIANCE",
+                    "purpose": "Corrupted date row",
+                    "action_type": "SPLIT",
+                    "ex_date": "invalid-date-format",
+                },
+                {
+                    "symbol": "RELIANCE",
+                    "purpose": "Stock Split from 10 to 2",
+                    "action_type": "SPLIT",
+                    "ex_date": "2026-09-01",
+                    "from_face_value": 10,
+                    "to_face_value": 2,
+                },
+            ]
+        }
+
+        provider = TejHQProvider()
+        actions = provider.get_actions("RELIANCE")
+
+        # Row 2 was skipped because of malformed date; rows 1 and 3 are parsed
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0].action_type, "dividend")
+        self.assertEqual(actions[0].ex_date, date(2026, 8, 15))
+        self.assertEqual(actions[0].cash_amount, Decimal("10.0"))
+        self.assertEqual(actions[1].action_type, "split")
+        self.assertEqual(actions[1].ex_date, date(2026, 9, 1))
+
+    @patch.object(TejHQProvider, "_request_with_retry")
+    def test_provider_empty_list(self, mock_req):
+        mock_req.return_value = {"data": []}
+
+        provider = TejHQProvider()
+        actions = provider.get_actions("TCS")
+        self.assertEqual(actions, [])
+
